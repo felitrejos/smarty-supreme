@@ -28,6 +28,22 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
     scheme: {}
+  FlickRecorder:
+    type: application
+    platform: iOS
+    sources: [Apps/FlickRecorder]
+    dependencies:
+      - package: FlickCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.flickpong.recorder
+        INFOPLIST_KEY_CFBundleDisplayName: Flick Recorder
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_FILE: Apps/FlickRecorder/Info.plist
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        TARGETED_DEVICE_FAMILY: "1"
+    scheme: {}
   FlickHost:
     type: application
     platform: macOS
