@@ -1,0 +1,44 @@
+name: FlickPong
+options:
+  deploymentTarget:
+    iOS: "18.0"
+    macOS: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: YES
+packages:
+  FlickCore:
+    path: FlickCore
+targets:
+  FlickPaddle:
+    type: application
+    platform: iOS
+    sources: [Apps/FlickPaddle]
+    dependencies:
+      - package: FlickCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.flickpong.paddle
+        INFOPLIST_KEY_CFBundleDisplayName: Flick Paddle
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1"
+    scheme: {}
+  FlickHost:
+    type: application
+    platform: macOS
+    sources: [Apps/FlickHost]
+    dependencies:
+      - package: FlickCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.flickpong.host
+        INFOPLIST_KEY_CFBundleDisplayName: Flick Pong
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.sports-games
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_HARDENED_RUNTIME: YES
+    scheme: {}
