@@ -12,9 +12,10 @@ An iPhone is the paddle, a Mac is the table. The spec lives in Claude Docs: Flic
 | `Apps/Link/` | MultipeerConnectivity transport shared by the paddle and the Mac |
 | `Apps/FlickRecorder/` | iPhone app that records labelled motion data for the swing detector |
 | `Fixtures/` | Recorded motion data: `recordings/` as exported, then `tuning/` (70%) and `holdout/` (30%) |
-| `Apps/FlickHost/` | Mac host (macOS 15+). For now a lobby showing each paired phone's round trip, clock offset, pointer rate, position and swings |
+| `Apps/FlickHost/` | Mac host (macOS 15+): the 3D table with a two-player keyboard game, and an iPhone Paddles window showing each paired phone's round trip, tilt updates, calibration and swings |
 | `project.yml` | XcodeGen spec. The Xcode project is generated, not committed. |
-| `Design/flick-pong-table.html` | 3D table and camera study the renderer follows |
+| `Design/flick-pong-table.html` | First 3D table and camera study |
+| `Assets/Lighting/` | Studio HDRI from Poly Haven (CC0) used to light the table |
 
 ## Run
 
@@ -54,3 +55,11 @@ swift run --package-path FlickCore flick-fixtures split Fixtures/recordings Fixt
 1. Run FlickHost on the Mac and FlickPaddle on one or two iPhones on the same Wi-Fi. Allow Local Network access on both when asked.
 2. The phone shows how long it took to pair after opening (target: 5 s or less).
 3. Calibrate the phone and leave it running for 10 minutes. The Mac's lobby shows the round trip p95 (target: 15 ms or less) and the pointer rate (target: at least 55 per second), each with a pass or fail mark.
+
+## Keyboard game (M4)
+
+FlickHost opens on the table. Player A uses A and D to move and W to swing; Player B uses ← and → to move and ↑ to swing. Holding a direction while swinging aims the return. Esc pauses, ⌘N starts a new game, ⌘1–3 switch between Player A's end, Player B's end and the side view, ⌘0 opens the iPhone Paddles window, and Help › Keyboard Controls shows the controls again.
+
+The engine benchmark runs with the tests (`EngineBenchmarkTests`, p99 under 0.1 ms per step). The render target (99% of frames under 8.3 ms, none dropped over 60 s) needs a Release build, the window in front and a 120 Hz display; View › Show Frame Times (⌥⌘F) shows the last 60 s.
+
+Design decisions and their references are in [DESIGN.md](DESIGN.md).

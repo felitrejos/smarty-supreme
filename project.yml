@@ -48,7 +48,11 @@ targets:
   FlickHost:
     type: application
     platform: macOS
-    sources: [Apps/FlickHost, Apps/Link]
+    sources:
+      - Apps/FlickHost
+      - Apps/Link
+      - path: Assets/Lighting
+        buildPhase: resources
     dependencies:
       - package: FlickCore
     settings:

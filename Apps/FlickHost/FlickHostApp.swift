@@ -3,12 +3,26 @@ import SwiftUI
 @main
 struct FlickHostApp: App {
     @State private var controller = HostController()
+    @State private var match = KeyboardMatch()
+    @State private var stats = FrameStats()
+    @AppStorage("showsFrameTimes") private var showsFrameTimes = false
 
     var body: some Scene {
-        WindowGroup {
-            LobbyView(controller: controller)
-                .frame(minWidth: 820, minHeight: 420)
+        Window("Flick Pong", id: "game") {
+            GameView(match: match, stats: stats, showsFrameTimes: showsFrameTimes)
+                .frame(minWidth: 900, minHeight: 600)
                 .onAppear(perform: controller.start)
         }
+        .commands {
+            GameCommands(match: match, showsFrameTimes: $showsFrameTimes)
+        }
+
+        Window("iPhone Paddles", id: "paddles") {
+            LobbyView(controller: controller)
+                .frame(minWidth: 460, minHeight: 540)
+                .onAppear(perform: controller.start)
+        }
+        .defaultSize(width: 520, height: 640)
+        .keyboardShortcut("0")
     }
 }

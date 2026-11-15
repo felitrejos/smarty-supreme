@@ -5,127 +5,117 @@ struct LobbyView: View {
     let controller: HostController
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
             let paddles = controller.link.paddles
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Flick Pong")
-                        .font(.largeTitle.weight(.semibold))
-                    Text(subtitle(paddleCount: paddles.count))
+            let waiting = controller.link.waitingNames
+            Form {
+                Section {
+                    LabeledContent("This Mac", value: controller.name)
+                } footer: {
+                    Text(footer)
                         .foregroundStyle(controller.networkFailure.latest == nil ? Color.secondary : Color.red)
                 }
-                HStack(alignment: .top, spacing: 16) {
-                    ForEach(Side.allCases, id: \.self) { side in
-                        SlotCard(side: side, paddle: paddles.first { $0.side == side })
+                ForEach(Side.allCases, id: \.self) { side in
+                    Section {
+                        if let paddle = paddles.first(where: { $0.side == side }) {
+                            PaddleRows(paddle: paddle)
+                        } else {
+                            Text("No iPhone yet")
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        HStack(spacing: 8) {
+                            Capsule().fill(side.rubberColor).frame(width: 14, height: 3)
+                            Text(side.playerName)
+                        }
                     }
                 }
-                let waiting = controller.link.waitingNames
                 if !waiting.isEmpty {
-                    Text("Waiting for a free slot: \(waiting.joined(separator: ", "))")
-                        .foregroundStyle(.secondary)
+                    Section("Waiting for a Free Slot") {
+                        ForEach(waiting, id: \.self) { Text($0) }
+                    }
                 }
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .formStyle(.grouped)
         }
+        .navigationTitle("iPhone Paddles")
     }
 
-    private func subtitle(paddleCount: Int) -> String {
+    private var footer: String {
         if let failure = controller.networkFailure.latest {
-            return "Can't advertise on the local network: \(failure)"
+            return "This Mac can’t be found on the local network: \(failure)"
         }
-        if paddleCount == 0 {
-            return "Open Flick Paddle on an iPhone on the same Wi-Fi. It connects to \(controller.name) on its own."
-        }
-        return "Advertising as \(controller.name)"
+        return "Open Flick Paddle on an iPhone on the same Wi‑Fi. It joins this Mac on its own."
     }
 }
 
-private struct SlotCard: View {
-    let side: Side
-    let paddle: HostLink.ConnectedPaddle?
+private struct PaddleRows: View {
+    private static let roundTripTarget: Microseconds = 15_000
+    private static let updateRateTarget = 55
+
+    let paddle: HostLink.ConnectedPaddle
+    private let sortedRoundTrips: [Microseconds]
+
+    init(paddle: HostLink.ConnectedPaddle) {
+        self.paddle = paddle
+        sortedRoundTrips = paddle.roundTrips.sorted()
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Circle()
-                    .fill(side == .playerA ? Color.blue : Color.orange)
-                    .frame(width: 10, height: 10)
-                Text(side == .playerA ? "Player A" : "Player B")
-                    .font(.headline)
-                Spacer()
-                Text(paddle?.name ?? "Empty")
-                    .foregroundStyle(.secondary)
-            }
-            if let paddle {
-                metrics(paddle)
-            }
+        LabeledContent("iPhone", value: paddle.name)
+        LabeledContent("Round trip") {
+            Measurement(text: roundTripText, meetsTarget: roundTripMeetsTarget)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+        LabeledContent("Tilt updates") {
+            Measurement(
+                text: "\(paddle.pointerRate) a second",
+                meetsTarget: paddle.position == nil ? nil : paddle.pointerRate >= Self.updateRateTarget
+            )
+        }
+        LabeledContent("Paddle") {
+            PositionBar(position: paddle.position)
+                .frame(width: 160)
+        }
+        LabeledContent("Tilt range", value: paddle.sensitivity.map { "±\(Int($0.rangeDegrees))°" } ?? "Not calibrated")
+        LabeledContent("Swings", value: swingText)
     }
 
-    private func metrics(_ paddle: HostLink.ConnectedPaddle) -> some View {
-        let roundTrips = RoundTripSummary(paddle.roundTrips)
-        return Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
-            GridRow {
-                Text("Round trip")
-                    .foregroundStyle(.secondary)
-                Text(roundTrips.description)
-                    .monospacedDigit()
-                Target(met: roundTrips.p95.map { $0 <= 15_000 }, label: "p95 ≤ 15 ms")
-            }
-            GridRow {
-                Text("Clock offset")
-                    .foregroundStyle(.secondary)
-                Text(paddle.peerAheadOfMac.map { String(format: "%+.1f ms", Double($0) / 1_000) } ?? "Syncing…")
-                    .monospacedDigit()
-                Text("")
-            }
-            GridRow {
-                Text("Pointer")
-                    .foregroundStyle(.secondary)
-                Text("\(paddle.pointerRate) per second")
-                    .monospacedDigit()
-                Target(met: paddle.position == nil ? nil : paddle.pointerRate >= 55, label: "≥ 55")
-            }
-            GridRow {
-                Text("Position")
-                    .foregroundStyle(.secondary)
-                PositionBar(position: paddle.position)
-                    .gridCellColumns(2)
-            }
-            GridRow {
-                Text("Calibration")
-                    .foregroundStyle(.secondary)
-                Text(paddle.sensitivity.map { "±\(Int($0.rangeDegrees))°" } ?? "Not yet")
-                Text("")
-            }
-            GridRow {
-                Text("Swings")
-                    .foregroundStyle(.secondary)
-                Text(swingText(paddle))
-                    .monospacedDigit()
-                Text("")
-            }
-        }
+    private var roundTripMeetsTarget: Bool? {
+        guard let worst = percentile(0.95) else { return nil }
+        return worst <= Self.roundTripTarget
     }
 
-    private func swingText(_ paddle: HostLink.ConnectedPaddle) -> String {
-        guard let swing = paddle.lastSwing else { return "\(paddle.swingCount)" }
+    private var roundTripText: String {
+        guard let typical = percentile(0.5), let worst = percentile(0.95) else { return "Measuring…" }
+        return String(format: "%.1f ms, 95%% under %.1f ms", Double(typical) / 1_000, Double(worst) / 1_000)
+    }
+
+    private var swingText: String {
+        guard let swing = paddle.lastSwing else { return "None yet" }
         return "\(paddle.swingCount), last at \(Int(swing.strength * 100))% strength"
     }
+
+    private func percentile(_ fraction: Double) -> Microseconds? {
+        guard !sortedRoundTrips.isEmpty else { return nil }
+        return sortedRoundTrips[Int((Double(sortedRoundTrips.count - 1) * fraction).rounded())]
+    }
 }
 
-private struct Target: View {
-    let met: Bool?
-    let label: String
+private struct Measurement: View {
+    let text: String
+    let meetsTarget: Bool?
 
     var body: some View {
-        Label(label, systemImage: met == true ? "checkmark.circle.fill" : met == false ? "xmark.circle.fill" : "circle.dashed")
-            .foregroundStyle(met == true ? Color.green : met == false ? Color.red : Color.secondary)
-            .font(.caption)
+        HStack(spacing: 6) {
+            Text(text)
+                .monospacedDigit()
+            if let meetsTarget {
+                Image(systemName: meetsTarget ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(meetsTarget ? Color.green : Color.orange)
+                    .help(meetsTarget ? "Within the link target" : "Outside the link target")
+                    .accessibilityLabel(meetsTarget ? "Within the link target" : "Outside the link target")
+            }
+        }
     }
 }
 
@@ -135,45 +125,18 @@ private struct PositionBar: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(.quaternary)
+                Capsule().fill(.quaternary)
                 if let position {
                     Capsule()
                         .fill(Color.accentColor)
-                        .frame(width: geometry.size.width * 0.15)
-                        .offset(x: position * geometry.size.width * 0.85)
+                        .frame(width: geometry.size.width * 0.18)
+                        .offset(x: position * geometry.size.width * 0.82)
                 }
             }
         }
-        .frame(height: 12)
-    }
-}
-
-private struct RoundTripSummary {
-    let last: Microseconds?
-    let p50: Microseconds?
-    let p95: Microseconds?
-    let count: Int
-
-    init(_ roundTrips: [Microseconds]) {
-        let sorted = roundTrips.sorted()
-        last = roundTrips.last
-        p50 = Self.percentile(0.5, of: sorted)
-        p95 = Self.percentile(0.95, of: sorted)
-        count = roundTrips.count
-    }
-
-    var description: String {
-        guard let last, let p50, let p95 else { return "Measuring…" }
-        return String(format: "%.1f ms now · p50 %.1f · p95 %.1f · %d samples", milliseconds(last), milliseconds(p50), milliseconds(p95), count)
-    }
-
-    private func milliseconds(_ value: Microseconds) -> Double {
-        Double(value) / 1_000
-    }
-
-    private static func percentile(_ fraction: Double, of sorted: [Microseconds]) -> Microseconds? {
-        guard !sorted.isEmpty else { return nil }
-        return sorted[Int((Double(sorted.count - 1) * fraction).rounded())]
+        .frame(height: 6)
+        .accessibilityElement()
+        .accessibilityLabel("Paddle position")
+        .accessibilityValue(position.map { "\(Int($0 * 100)) percent across" } ?? "No position yet")
     }
 }
