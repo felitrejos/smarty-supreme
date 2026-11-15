@@ -16,7 +16,7 @@ public enum Channel: Sendable {
 public enum TransportEvent: Equatable, Sendable {
     case connected(PeerID)
     case disconnected(PeerID)
-    case received(Data, from: PeerID, on: Channel)
+    case received(Data, from: PeerID)
 }
 
 public typealias TransportEventHandler = @Sendable (TransportEvent) -> Void

@@ -6,6 +6,14 @@ public struct SwingEvent: Equatable, Sendable {
     public let peakRotationRate: Double
     public let direction: SIMD3<Double>
     public let strength: Double
+
+    public init(peakTime: Microseconds, peakAcceleration: Double, peakRotationRate: Double, direction: SIMD3<Double>, strength: Double) {
+        self.peakTime = peakTime
+        self.peakAcceleration = peakAcceleration
+        self.peakRotationRate = peakRotationRate
+        self.direction = direction
+        self.strength = strength
+    }
 }
 
 public enum SwingDetectorEvent: Equatable, Sendable {

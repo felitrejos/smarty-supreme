@@ -124,7 +124,7 @@ public final class LoopbackNetwork: Sendable {
                 arrival = max(arrival, state.lastReliableArrival[route] ?? 0)
                 state.lastReliableArrival[route] = arrival
             }
-            let event = TransportEvent.received(payload, from: sender, on: channel)
+            let event = TransportEvent.received(payload, from: sender)
             state.schedule(Delivery(at: arrival, event: event, route: route, handler: state.handlers[recipient]!))
         }
     }

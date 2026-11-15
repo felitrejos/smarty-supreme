@@ -17,12 +17,13 @@ targets:
   FlickPaddle:
     type: application
     platform: iOS
-    sources: [Apps/FlickPaddle, Apps/Shared]
+    sources: [Apps/FlickPaddle, Apps/Shared, Apps/Link]
     dependencies:
       - package: FlickCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.flickpong.paddle
+        INFOPLIST_FILE: Apps/FlickPaddle/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Flick Paddle
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
@@ -47,12 +48,15 @@ targets:
   FlickHost:
     type: application
     platform: macOS
-    sources: [Apps/FlickHost]
+    sources: [Apps/FlickHost, Apps/Link]
     dependencies:
       - package: FlickCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.flickpong.host
+        INFOPLIST_FILE: Apps/FlickHost/Info.plist
+        ENABLE_INCOMING_NETWORK_CONNECTIONS: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
         INFOPLIST_KEY_CFBundleDisplayName: Flick Pong
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.sports-games
         ENABLE_APP_SANDBOX: YES

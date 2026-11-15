@@ -9,6 +9,11 @@ final class PaddleSensing: Sendable {
         case failed(CalibrationFailure)
     }
 
+    struct Outcome {
+        var swing: SwingEvent?
+        var calibratedWith: Sensitivity?
+    }
+
     struct Snapshot {
         let sensitivity: Sensitivity
         let calibration: CalibrationStatus
@@ -58,22 +63,31 @@ final class PaddleSensing: Sendable {
         }
     }
 
-    func setSensitivity(_ sensitivity: Sensitivity) {
+    var position: Double? {
         state.withLock { state in
-            state.sensitivity = sensitivity
-            if let mapper = state.mapper {
-                state.mapper = PointerMapper(neutralRollDegrees: mapper.neutralRollDegrees, sensitivity: sensitivity)
-            }
+            guard case .position(let position) = state.reading else { return nil }
+            return position
         }
     }
 
-    func process(_ sample: MotionSample) {
+    func setSensitivity(_ sensitivity: Sensitivity) -> Bool {
         state.withLock { state in
+            state.sensitivity = sensitivity
+            guard let mapper = state.mapper else { return false }
+            state.mapper = PointerMapper(neutralRollDegrees: mapper.neutralRollDegrees, sensitivity: sensitivity)
+            return true
+        }
+    }
+
+    func process(_ sample: MotionSample) -> Outcome {
+        state.withLock { state in
+            var outcome = Outcome()
             state.latestSampleAt = sample.time
             switch state.detector.process(sample) {
             case .swing(let swing):
                 state.swings += 1
                 state.lastSwing = swing
+                outcome.swing = swing
             case .drop:
                 state.lastDropAt = sample.time
             case nil:
@@ -82,6 +96,9 @@ final class PaddleSensing: Sendable {
             if var calibrator = state.calibrator {
                 if let result = calibrator.add(sample) {
                     finishCalibration(result, in: &state)
+                    if case .calibrated = result {
+                        outcome.calibratedWith = state.sensitivity
+                    }
                 } else {
                     state.calibrator = calibrator
                 }
@@ -90,6 +107,7 @@ final class PaddleSensing: Sendable {
                 state.reading = mapper.update(sample, holding: state.detector.isMidSwing)
                 state.mapper = mapper
             }
+            return outcome
         }
     }
 

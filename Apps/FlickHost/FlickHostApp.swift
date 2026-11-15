@@ -2,11 +2,13 @@ import SwiftUI
 
 @main
 struct FlickHostApp: App {
+    @State private var controller = HostController()
+
     var body: some Scene {
         WindowGroup {
-            Text("Flick Pong")
-                .font(.largeTitle.weight(.semibold))
-                .frame(minWidth: 800, minHeight: 500)
+            LobbyView(controller: controller)
+                .frame(minWidth: 820, minHeight: 420)
+                .onAppear(perform: controller.start)
         }
     }
 }

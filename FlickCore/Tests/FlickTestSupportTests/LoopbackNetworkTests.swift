@@ -21,7 +21,7 @@ struct LoopbackNetworkTests {
 
         harness.network.advance(by: 1)
         let arrival = try #require(harness.hostInbox.received.first)
-        #expect(arrival.event == .received(packet(7), from: Harness.phone, on: .reliable))
+        #expect(arrival.event == .received(packet(7), from: Harness.phone))
         #expect(arrival.at == 20_000)
     }
 
@@ -123,7 +123,7 @@ struct LoopbackNetworkTests {
         let phone = network.join(as: Harness.phone, onEvent: phoneInbox.record)
         let hostTransport = Mutex<LoopbackTransport?>(nil)
         let host = network.join(as: Harness.host) { event in
-            guard case .received(let payload, let sender, .unreliable) = event else { return }
+            guard case .received(let payload, let sender) = event else { return }
             let transport = hostTransport.withLock { $0 }
             do {
                 try transport?.send(payload, to: sender, on: .unreliable)
@@ -138,7 +138,7 @@ struct LoopbackNetworkTests {
         network.advance(by: 50_000)
 
         let echo = try #require(phoneInbox.received.first)
-        #expect(echo.event == .received(packet(9), from: Harness.host, on: .unreliable))
+        #expect(echo.event == .received(packet(9), from: Harness.host))
         #expect(echo.at == 40_000)
     }
 }
@@ -194,7 +194,7 @@ private final class Inbox: Sendable {
 
     var receivedIndices: [UInt32] {
         received.compactMap {
-            guard case .received(let payload, _, _) = $0.event else { return nil }
+            guard case .received(let payload, _) = $0.event else { return nil }
             return index(of: payload)
         }
     }
