@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct FlickRecorderApp: App {
     @State private var library = RecordingLibrary()
-    @State private var motion = MotionRecorder()
+    @State private var motion = MotionService()
 
     var body: some Scene {
         WindowGroup {

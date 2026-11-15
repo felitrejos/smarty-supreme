@@ -3,7 +3,7 @@ import FlickCore
 import simd
 
 @MainActor
-final class MotionRecorder {
+final class MotionService {
     private static let sampleRate = 100.0
 
     private let manager = CMMotionManager()
@@ -18,13 +18,13 @@ final class MotionRecorder {
         manager.isDeviceMotionAvailable
     }
 
-    func start(_ recording: LiveRecording) {
+    func start(onSample: @escaping @Sendable (MotionSample) -> Void, onError: @escaping @Sendable (Error) -> Void) {
         manager.deviceMotionUpdateInterval = 1 / Self.sampleRate
         manager.startDeviceMotionUpdates(to: queue) { @Sendable motion, error in
             if let motion {
-                recording.record(MotionSample(motion))
+                onSample(MotionSample(motion))
             } else if let error {
-                recording.reportSensorError(error)
+                onError(error)
             }
         }
     }
@@ -32,6 +32,10 @@ final class MotionRecorder {
     func stop() {
         manager.stopDeviceMotionUpdates()
     }
+}
+
+func microseconds(sinceBoot seconds: TimeInterval) -> Microseconds {
+    Microseconds((seconds * 1_000_000).rounded())
 }
 
 private extension MotionSample {

@@ -7,7 +7,8 @@ An iPhone is the paddle, a Mac is the table. The spec lives in Claude Docs: Flic
 | Path | What it is |
 | --- | --- |
 | `FlickCore/` | Swift package with all hardware-free logic. `FlickTestSupport` holds the fakes (`ManualClock`, `LoopbackNetwork`). `FixtureTools` and the `flick-fixtures` command check and split the sensor dataset. |
-| `Apps/FlickPaddle/` | iPhone app (iOS 18+) |
+| `Apps/FlickPaddle/` | iPhone app (iOS 18+). For now it opens a sensor test screen: calibrate, tilt to move the paddle, swing to count hits. |
+| `Apps/Shared/` | Core Motion wrapper shared by the iPhone apps |
 | `Apps/FlickRecorder/` | iPhone app that records labelled motion data for the swing detector |
 | `Fixtures/` | Recorded motion data: `recordings/` as exported, then `tuning/` (70%) and `holdout/` (30%) |
 | `Apps/FlickHost/` | Mac app (macOS 15+) |
@@ -41,7 +42,7 @@ To run on a real iPhone, pick your team under Signing & Capabilities for the app
 swift run --package-path FlickCore flick-fixtures summary Fixtures/recordings
 ```
 
-5. When the summary says complete, split once. Every recording is cut at 70% of its length, moved to the nearest gap between swings.
+5. When the summary says complete, split once. After the split, `swift test` also runs the sensing benchmarks on `Fixtures/holdout`: swing recall and precision, detection delay and paddle jitter. Until then they show as skipped. Every recording is cut at 70% of its length, moved to the nearest gap between swings.
 
 ```bash
 swift run --package-path FlickCore flick-fixtures split Fixtures/recordings Fixtures

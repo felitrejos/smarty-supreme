@@ -17,7 +17,7 @@ targets:
   FlickPaddle:
     type: application
     platform: iOS
-    sources: [Apps/FlickPaddle]
+    sources: [Apps/FlickPaddle, Apps/Shared]
     dependencies:
       - package: FlickCore
     settings:
@@ -31,7 +31,7 @@ targets:
   FlickRecorder:
     type: application
     platform: iOS
-    sources: [Apps/FlickRecorder]
+    sources: [Apps/FlickRecorder, Apps/Shared]
     dependencies:
       - package: FlickCore
     settings:

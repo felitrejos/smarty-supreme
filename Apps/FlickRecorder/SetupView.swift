@@ -3,7 +3,7 @@ import SwiftUI
 
 struct SetupView: View {
     let library: RecordingLibrary
-    let motion: MotionRecorder
+    let motion: MotionService
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var participant = 1
@@ -75,7 +75,7 @@ struct SetupView: View {
 
     private func start() {
         let recording = LiveRecording(activity: activity, participant: participant)
-        motion.start(recording)
+        motion.start(onSample: recording.record, onError: recording.reportSensorError)
         liveRecording = recording
     }
 

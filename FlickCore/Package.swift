@@ -17,5 +17,6 @@ let package = Package(
         .testTarget(name: "FlickCoreTests", dependencies: ["FlickCore"]),
         .testTarget(name: "FlickTestSupportTests", dependencies: ["FlickCore", "FlickTestSupport"]),
         .testTarget(name: "FixtureToolsTests", dependencies: ["FlickCore", "FixtureTools"]),
+        .testTarget(name: "SensingBenchmarkTests", dependencies: ["FlickCore"]),
     ]
 )
