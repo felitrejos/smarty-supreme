@@ -12,6 +12,7 @@ final class PaddleController {
     let link: PaddleLink
     let launchedAt: Microseconds
     let networkFailure = NetworkFailure()
+    let haptics = HapticPlayer()
 
     private let motion: MotionService
     private let transport: MultipeerTransport
@@ -23,7 +24,14 @@ final class PaddleController {
     init(motion: MotionService, launchedAt: Microseconds) {
         let relay = EventRelay()
         transport = MultipeerTransport(mode: .browse, onEvent: relay.forward, onFailure: networkFailure.record)
-        link = PaddleLink(name: String(UIDevice.current.name.prefix(Self.longestName)), transport: transport, clock: SystemClock())
+        link = PaddleLink(
+            name: String(UIDevice.current.name.prefix(Self.longestName)),
+            transport: transport,
+            clock: SystemClock(),
+            onHaptic: { [haptics] kind in
+                Task { @MainActor in haptics.play(kind) }
+            }
+        )
         relay.connect(link.handle)
         self.motion = motion
         self.launchedAt = launchedAt
@@ -41,6 +49,7 @@ final class PaddleController {
             motion.start(onSample: forwardSample, onError: sensing.reportSensorError)
         }
         pointerTimer = makePointerTimer()
+        haptics.prepare()
         UIApplication.shared.isIdleTimerDisabled = true
     }
 

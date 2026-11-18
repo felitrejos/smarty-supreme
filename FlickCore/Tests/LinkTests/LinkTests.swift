@@ -35,7 +35,7 @@ struct LinkTests {
         let network = LoopbackNetwork(clock: clock, seed: 1)
         let relay = EventRelay()
         let phoneTransport = network.join(as: PeerID("Phone A"), onEvent: relay.forward)
-        let phone = PaddleLink(name: "Phone A", transport: phoneTransport, clock: clock)
+        let phone = PaddleLink(name: "Phone A", transport: phoneTransport, clock: clock, onHaptic: { _ in })
         relay.connect(phone.handle)
         let oldHost = network.join(as: PeerID("Old Mac")) { _ in }
         network.connect(PeerID("Phone A"), PeerID("Old Mac"))
@@ -147,7 +147,7 @@ struct LinkTests {
         let clock = ManualClock()
         let network = LoopbackNetwork(clock: clock, seed: 1)
         let relay = EventRelay()
-        let phone = PaddleLink(name: "Phone A", transport: network.join(as: PeerID("Phone A"), onEvent: relay.forward), clock: clock)
+        let phone = PaddleLink(name: "Phone A", transport: network.join(as: PeerID("Phone A"), onEvent: relay.forward), clock: clock, onHaptic: { _ in })
         relay.connect(phone.handle)
         let silentHost = DataInbox()
         _ = network.join(as: PeerID("Silent Mac"), onEvent: silentHost.record)
@@ -243,6 +243,47 @@ struct LinkTests {
         #expect(harness.host.waitingNames == ["Phone E"])
     }
 
+    @Test func swingsQueueUntilTheHostTakesThemAlongWithEachSidesPosition() throws {
+        let harness = LinkHarness()
+        let phoneA = harness.addPhone("Phone A")
+        harness.run(for: 50_000)
+        let phoneB = harness.addPhone("Phone B")
+        harness.run(for: 1_500_000)
+        phoneA.sendPointer(0.25)
+        phoneB.sendPointer(0.75)
+        for strength in [0.2, 0.4] {
+            phoneA.sendSwing(SwingEvent(peakTime: harness.clock.now, peakAcceleration: 4, peakRotationRate: 6, direction: SIMD3(0, 0, 1), strength: strength))
+        }
+        harness.run(for: 50_000)
+
+        let input = harness.host.takeInput()
+        let afterwards = harness.host.takeInput()
+
+        #expect(input[.playerA]?.position == 0.25)
+        #expect(input[.playerA]?.swings.map { Float($0.strength) } == [0.2, 0.4])
+        #expect(input[.playerB]?.position == 0.75)
+        #expect(input[.playerB]?.swings.isEmpty == true)
+        #expect(afterwards[.playerA]?.swings.isEmpty == true)
+        #expect(afterwards[.playerA]?.position == 0.25)
+    }
+
+    @Test func aHapticReachesOnlyThePhoneOnThatSide() {
+        let harness = LinkHarness()
+        let hapticsA = HapticInbox()
+        let hapticsB = HapticInbox()
+        _ = harness.addPhone("Phone A", onHaptic: hapticsA.record)
+        harness.run(for: 50_000)
+        _ = harness.addPhone("Phone B", onHaptic: hapticsB.record)
+        harness.run(for: 50_000)
+
+        harness.host.send(.hit, to: .playerB)
+        harness.host.send(.win, to: .playerB)
+        harness.run(for: 50_000)
+
+        #expect(hapticsA.kinds.isEmpty)
+        #expect(hapticsB.kinds == [.hit, .win])
+    }
+
     @Test func roundTripHistoryKeepsTheLastTenMinutes() throws {
         let harness = LinkHarness()
         _ = harness.addPhone("Phone A")
@@ -277,6 +318,18 @@ final class DataInbox: Sendable {
     }
 }
 
+final class HapticInbox: Sendable {
+    private let received = Mutex<[HapticKind]>([])
+
+    var kinds: [HapticKind] {
+        received.withLock { $0 }
+    }
+
+    func record(_ kind: HapticKind) {
+        received.withLock { $0.append(kind) }
+    }
+}
+
 struct RawPeer {
     let transport: LoopbackTransport
     let inbox: DataInbox
@@ -302,10 +355,10 @@ struct LinkHarness {
         relay.connect(host.handle)
     }
 
-    func addPhone(_ name: String, ahead: Microseconds = 0) -> PaddleLink {
+    func addPhone(_ name: String, ahead: Microseconds = 0, onHaptic: @escaping @Sendable (HapticKind) -> Void = { _ in }) -> PaddleLink {
         let relay = EventRelay()
         let transport = network.join(as: PeerID(name), onEvent: relay.forward)
-        let phone = PaddleLink(name: name, transport: transport, clock: OffsetClock(base: clock, ahead: ahead))
+        let phone = PaddleLink(name: name, transport: transport, clock: OffsetClock(base: clock, ahead: ahead), onHaptic: onHaptic)
         relay.connect(phone.handle)
         network.connect(PeerID(name), Self.hostID)
         return phone

@@ -12,6 +12,11 @@ public final class HostLink: Sendable {
         public let direction: SIMD3<Double>
     }
 
+    public struct PaddleInput: Equatable, Sendable {
+        public let position: Double?
+        public let swings: [ReceivedSwing]
+    }
+
     public struct ConnectedPaddle: Equatable, Sendable {
         public let peer: PeerID
         public let name: String
@@ -38,6 +43,7 @@ public final class HostLink: Sendable {
         var unansweredPingAt: Microseconds?
         var swingCount = 0
         var lastSwing: ReceivedSwing?
+        var untakenSwings: [ReceivedSwing] = []
 
         init(name: String, side: Side) {
             self.name = name
@@ -95,6 +101,25 @@ public final class HostLink: Sendable {
 
     public var waitingNames: [String] {
         state.withLock { $0.waiting.map(\.name) }
+    }
+
+    public func takeInput() -> [Side: PaddleInput] {
+        state.withLock { state in
+            var input: [Side: PaddleInput] = [:]
+            for (peer, paddle) in state.paddles {
+                input[paddle.side] = PaddleInput(position: paddle.position, swings: paddle.untakenSwings)
+                state.paddles[peer]?.untakenSwings.removeAll()
+            }
+            return input
+        }
+    }
+
+    public func send(_ haptic: HapticKind, to side: Side) {
+        let now = clock.now
+        state.withLock { state in
+            guard let peer = state.paddles.first(where: { $0.value.side == side })?.key else { return }
+            state.outbox.send(.haptic(haptic), to: peer, at: now, over: transport)
+        }
     }
 
     public func handle(_ event: TransportEvent) {
@@ -168,12 +193,14 @@ public final class HostLink: Sendable {
                 paddle.position = Double(position)
             }
         case .swing(let swing):
-            paddle.swingCount += 1
-            paddle.lastSwing = ReceivedSwing(
+            let received = ReceivedSwing(
                 macPeakTime: paddle.clockSync.macTime(forPeerTime: swing.peakAt),
                 strength: Double(swing.strength),
                 direction: SIMD3<Double>(swing.direction)
             )
+            paddle.swingCount += 1
+            paddle.lastSwing = received
+            paddle.untakenSwings.append(received)
         case .calibrated(let sensitivity):
             paddle.sensitivity = sensitivity
         default:

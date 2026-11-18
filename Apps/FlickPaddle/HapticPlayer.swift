@@ -1,0 +1,33 @@
+import FlickCore
+import UIKit
+
+@MainActor
+final class HapticPlayer {
+    private let contact = UIImpactFeedbackGenerator(style: .rigid)
+    private let whiff = UIImpactFeedbackGenerator(style: .soft)
+    private let outcome = UINotificationFeedbackGenerator()
+
+    func prepare() {
+        contact.prepare()
+        whiff.prepare()
+        outcome.prepare()
+    }
+
+    func play(_ kind: HapticKind) {
+        switch kind {
+        case .hit:
+            contact.impactOccurred(intensity: 1)
+            contact.prepare()
+        case .miss:
+            whiff.impactOccurred(intensity: 0.5)
+            whiff.prepare()
+        case .point:
+            outcome.notificationOccurred(.success)
+            outcome.prepare()
+        case .win:
+            outcome.notificationOccurred(.success)
+            contact.impactOccurred(intensity: 1)
+            outcome.prepare()
+        }
+    }
+}

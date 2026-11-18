@@ -20,12 +20,14 @@ public final class PaddleLink: Sendable {
     private let name: String
     private let transport: any Transport
     private let clock: any MonotonicClock
+    private let onHaptic: @Sendable (HapticKind) -> Void
     private let state = Mutex(State())
 
-    public init(name: String, transport: any Transport, clock: any MonotonicClock) {
+    public init(name: String, transport: any Transport, clock: any MonotonicClock, onHaptic: @escaping @Sendable (HapticKind) -> Void) {
         self.name = name
         self.transport = transport
         self.clock = clock
+        self.onHaptic = onHaptic
     }
 
     public var status: Status {
@@ -38,22 +40,27 @@ public final class PaddleLink: Sendable {
 
     public func handle(_ event: TransportEvent) {
         let receivedAt = clock.now
-        state.withLock { state in
+        let haptic = state.withLock { state -> HapticKind? in
             switch event {
             case .connected(let host):
                 state.host = host
                 state.status = .handshaking
                 send(.hello(name: name), in: &state)
+                return nil
             case .disconnected(let peer):
-                guard peer == state.host else { return }
+                guard peer == state.host else { return nil }
                 state.host = nil
                 if state.status != .refused(.versionMismatch) {
                     state.status = .searching
                 }
+                return nil
             case .received(let data, let sender):
-                guard sender == state.host else { return }
-                receive(data, at: receivedAt, in: &state)
+                guard sender == state.host else { return nil }
+                return receive(data, at: receivedAt, in: &state)
             }
+        }
+        if let haptic {
+            onHaptic(haptic)
         }
     }
 
@@ -84,15 +91,15 @@ public final class PaddleLink: Sendable {
         }
     }
 
-    private func receive(_ data: Data, at receivedAt: Microseconds, in state: inout State) {
+    private func receive(_ data: Data, at receivedAt: Microseconds, in state: inout State) -> HapticKind? {
         let packet: Packet
         do throws(MessageDecodingError) {
             packet = try MessageCodec.decode(data)
         } catch .otherVersion {
             state.status = .refused(.versionMismatch)
-            return
+            return nil
         } catch {
-            return
+            return nil
         }
         switch packet.message {
         case .helloAck(let hostName):
@@ -105,9 +112,12 @@ public final class PaddleLink: Sendable {
             state.status = .refused(reason)
         case .ping:
             send(.pong(pingSentAt: packet.sentAt, receivedAt: receivedAt), in: &state)
+        case .haptic(let kind):
+            return kind
         default:
-            return
+            break
         }
+        return nil
     }
 
     private func sendWhilePaired(_ message: Message) {

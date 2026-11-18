@@ -1,18 +1,18 @@
 import SwiftUI
 
 struct GameCommands: Commands {
-    let match: KeyboardMatch
+    let match: Match
     @Binding var showsFrameTimes: Bool
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Game", action: match.newGame)
+            Button("New Game…", action: match.chooseNewGame)
                 .keyboardShortcut("n")
         }
         CommandMenu("Game") {
             Button(match.isPaused ? "Resume" : "Pause", action: match.togglePause)
                 .keyboardShortcut(.escape, modifiers: [])
-                .disabled(match.isGameOver)
+                .disabled(match.isGameOver || match.isChoosingNewGame)
         }
         CommandGroup(before: .toolbar) {
             ForEach(CameraView.allCases, id: \.self) { camera in
@@ -25,7 +25,7 @@ struct GameCommands: Commands {
             Divider()
         }
         CommandGroup(replacing: .help) {
-            Button("Keyboard Controls", action: match.showControls)
+            Button("Controls", action: match.showControls)
         }
     }
 }

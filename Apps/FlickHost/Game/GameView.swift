@@ -13,7 +13,7 @@ final class Stage {
 }
 
 struct GameView: View {
-    let match: KeyboardMatch
+    let match: Match
     let stats: FrameStats
     let showsFrameTimes: Bool
 
@@ -39,12 +39,12 @@ struct GameView: View {
             }
         }
         .overlay(alignment: .top) {
-            Scoreboard(score: match.score, server: server)
+            Scoreboard(score: match.score, server: server, name: match.name(of:))
                 .padding(.top, 16)
         }
         .overlay {
             if case .gameOver(let winner) = match.phase {
-                WinnerCard(winner: winner, score: match.score, newGame: match.newGame)
+                WinnerCard(winner: match.name(of: winner), score: match.score, playAgain: match.playAgain)
             } else if let failure = stage.failure {
                 Text(failure)
                     .padding(16)
@@ -53,7 +53,7 @@ struct GameView: View {
         }
         .overlay(alignment: .bottom) {
             if match.showsControls {
-                ControlsHint()
+                ControlsHint(name: match.name(of:), controls: controls(for:))
                     .padding(.bottom, 24)
                     .transition(.opacity)
             }
@@ -65,6 +65,9 @@ struct GameView: View {
             }
         }
         .animation(.easeOut(duration: 0.3), value: match.showsControls)
+        .sheet(isPresented: Binding(get: { match.isChoosingNewGame }, set: { if !$0 { match.cancelNewGame() } })) {
+            NewGameSheet(setup: match.setup, start: match.start, cancel: match.cancelNewGame)
+        }
         .navigationTitle("Flick Pong")
         .navigationSubtitle(subtitle)
         .accessibilityLabel("Table tennis table")
@@ -99,13 +102,20 @@ struct GameView: View {
         return nil
     }
 
+    private func controls(for side: Side) -> PlayerControls {
+        switch side {
+        case .playerA: match.isPhonePlaying ? .phone : .keyboard(move: ["A", "D"], swing: "W")
+        case .playerB: match.setup.opponent == .computer ? .computer(match.setup.difficulty) : .keyboard(move: ["←", "→"], swing: "↑")
+        }
+    }
+
     private var subtitle: String {
         switch match.phase {
-        case .serving(let server, _): "\(server.playerName) to serve"
+        case .serving(let server, _): "\(match.name(of: server)) to serve"
         case .rally: match.rally < 2 ? "Rally" : "Rally of \(match.rally)"
         case .pointScored: "Point"
         case .paused: "Paused"
-        case .gameOver(let winner): "\(winner.playerName) wins"
+        case .gameOver(let winner): "\(match.name(of: winner)) wins"
         }
     }
 }
@@ -138,6 +148,7 @@ extension View {
 private struct Scoreboard: View {
     let score: Score
     let server: Side?
+    let name: (Side) -> String
 
     var body: some View {
         HStack(spacing: 22) {
@@ -157,12 +168,13 @@ private struct Scoreboard: View {
     private func player(_ side: Side) -> some View {
         let score = score[side]
         let isServing = server == side
+        let name = name(side)
         return HStack(spacing: 10) {
             if side == .playerB {
                 Text("\(score)").scoreFigure()
             }
             VStack(alignment: side == .playerA ? .trailing : .leading, spacing: 3) {
-                Text(side.playerName)
+                Text(name)
                     .font(.callout.weight(.medium))
                 Capsule()
                     .fill(side.rubberColor)
@@ -174,7 +186,7 @@ private struct Scoreboard: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(side.playerName), \(score) points\(isServing ? ", serving" : "")")
+        .accessibilityLabel("\(name), \(score) points\(isServing ? ", serving" : "")")
     }
 
 }
@@ -188,18 +200,18 @@ private extension Text {
 }
 
 private struct WinnerCard: View {
-    let winner: Side
+    let winner: String
     let score: Score
-    let newGame: () -> Void
+    let playAgain: () -> Void
 
     var body: some View {
         VStack(spacing: 14) {
-            Text("\(winner.playerName) wins")
+            Text("\(winner) wins")
                 .font(.title2.weight(.semibold))
             Text("\(max(score.a, score.b))–\(min(score.a, score.b))")
                 .font(.system(size: 44, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-            Button("New Game", action: newGame)
+            Button("Play Again", action: playAgain)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
         }
@@ -209,34 +221,109 @@ private struct WinnerCard: View {
     }
 }
 
+private enum PlayerControls {
+    case keyboard(move: [String], swing: String)
+    case phone
+    case computer(Difficulty)
+}
+
 private struct ControlsHint: View {
+    let name: (Side) -> String
+    let controls: (Side) -> PlayerControls
+
     var body: some View {
         HStack(spacing: 28) {
-            controls(for: .playerA, move: ["A", "D"], swing: "W")
+            hint(for: .playerA)
             Divider().frame(height: 22)
-            controls(for: .playerB, move: ["←", "→"], swing: "↑")
+            hint(for: .playerB)
         }
+        .font(.callout)
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .glassPanel(Capsule())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Player A moves with A and D and swings with W. Player B moves with the left and right arrows and swings with the up arrow.")
+        .accessibilityLabel(Side.allCases.map(spokenHint).joined(separator: " "))
     }
 
-    private func controls(for side: Side, move: [String], swing: String) -> some View {
+    @ViewBuilder
+    private func hint(for side: Side) -> some View {
         HStack(spacing: 8) {
-            Text(side.playerName)
+            Text(name(side))
                 .font(.callout.weight(.medium))
-            HStack(spacing: 3) {
-                ForEach(move, id: \.self) { Keycap(label: $0) }
+            switch controls(side) {
+            case .keyboard(let move, let swing):
+                HStack(spacing: 3) {
+                    ForEach(move, id: \.self) { Keycap(label: $0) }
+                }
+                Text("move")
+                    .foregroundStyle(.secondary)
+                Keycap(label: swing)
+                Text("swing")
+                    .foregroundStyle(.secondary)
+            case .phone:
+                Image(systemName: "iphone")
+                    .foregroundStyle(.secondary)
+                Text("Tilt to move, swing to hit")
+                    .foregroundStyle(.secondary)
+            case .computer(let difficulty):
+                Text(difficulty.title)
+                    .foregroundStyle(.secondary)
             }
-            Text("move")
-                .foregroundStyle(.secondary)
-            Keycap(label: swing)
-            Text("swing")
-                .foregroundStyle(.secondary)
         }
-        .font(.callout)
+    }
+
+    private func spokenHint(for side: Side) -> String {
+        switch controls(side) {
+        case .keyboard(let move, let swing):
+            "\(name(side)) moves with \(move.joined(separator: " and ")) and swings with \(swing)."
+        case .phone:
+            "\(name(side)) tilts the iPhone to move and swings it to hit."
+        case .computer(let difficulty):
+            "\(name(side)) plays at \(difficulty.title) difficulty."
+        }
+    }
+}
+
+private struct NewGameSheet: View {
+    @State private var setup: MatchSetup
+    private let start: (MatchSetup) -> Void
+    private let cancel: () -> Void
+
+    init(setup: MatchSetup, start: @escaping (MatchSetup) -> Void, cancel: @escaping () -> Void) {
+        _setup = State(initialValue: setup)
+        self.start = start
+        self.cancel = cancel
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("New Game")
+                .font(.headline)
+                .padding([.horizontal, .top], 20)
+            Form {
+                Picker("Opponent", selection: $setup.opponent) {
+                    ForEach(Opponent.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.radioGroup)
+                Picker("Difficulty", selection: $setup.difficulty) {
+                    ForEach(Difficulty.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(setup.opponent != .computer)
+            }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: cancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Start") { start(setup) }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding([.horizontal, .bottom], 20)
+        }
+        .frame(width: 440)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

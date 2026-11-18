@@ -56,9 +56,17 @@ swift run --package-path FlickCore flick-fixtures split Fixtures/recordings Fixt
 2. The phone shows how long it took to pair after opening (target: 5 s or less).
 3. Calibrate the phone and leave it running for 10 minutes. The Mac's lobby shows the round trip p95 (target: 15 ms or less) and the pointer rate (target: at least 55 per second), each with a pass or fail mark.
 
-## Keyboard game (M4)
+## Playing (M4, M5)
 
-FlickHost opens on the table. Player A uses A and D to move and W to swing; Player B uses ← and → to move and ↑ to swing. Holding a direction while swinging aims the return. Esc pauses, ⌘N starts a new game, ⌘1–3 switch between Player A's end, Player B's end and the side view, ⌘0 opens the iPhone Paddles window, and Help › Keyboard Controls shows the controls again.
+FlickHost opens on the table against the computer. File › New Game… (⌘N) picks the opponent, the computer or a second player on this keyboard, and the computer's difficulty. The choice is kept for the next launch.
+
+Player A is the first iPhone that joins, once it is calibrated: tilt it to move, swing it toward the screen to hit. It buzzes on a hit, a miss, a point and the win. If that phone drops out mid-game, the game pauses. Without a phone, Player A uses A and D to move and W to swing. A keyboard Player B uses ← and → to move and ↑ to swing. Holding a direction while swinging aims the return. Esc pauses, ⌘1–3 switch between Player A's end, Player B's end and the side view, ⌘0 opens the iPhone Paddles window, and Help › Controls shows the controls again.
+
+The AI balance benchmark plays 1,000 games per difficulty against a scripted average player. It only runs in an optimized build:
+
+```bash
+swift test --package-path FlickCore -c release --filter AIBalanceBenchmarkTests
+```
 
 The engine benchmark runs with the tests (`EngineBenchmarkTests`, p99 under 0.1 ms per step). The render target (99% of frames under 8.3 ms, none dropped over 60 s) needs a Release build, the window in front and a 120 Hz display; View › Show Frame Times (⌥⌘F) shows the last 60 s.
 

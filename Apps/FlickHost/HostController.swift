@@ -8,6 +8,7 @@ final class HostController {
     private static let longestName = 40
 
     let link: HostLink
+    let match: Match
     let name: String
     let networkFailure = NetworkFailure()
 
@@ -20,6 +21,7 @@ final class HostController {
         name = String(computerName.prefix(Self.longestName))
         transport = MultipeerTransport(mode: .advertise, onEvent: relay.forward, onFailure: networkFailure.record)
         link = HostLink(name: name, transport: transport, clock: SystemClock())
+        match = Match(link: link, clock: SystemClock(), defaults: .standard)
         relay.connect(link.handle)
     }
 
