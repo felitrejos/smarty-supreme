@@ -10,16 +10,20 @@ public struct SystemClock: MonotonicClock {
 }
 
 public final class EventRelay: Sendable {
-    private let target = Mutex<TransportEventHandler?>(nil)
+    private struct Target: Sendable {
+        let handle: TransportEventHandler
+    }
+
+    private let target = Mutex<Target?>(nil)
 
     public init() {}
 
     public func connect(_ handler: @escaping TransportEventHandler) {
-        target.withLock { $0 = handler }
+        target.withLock { $0 = Target(handle: handler) }
     }
 
     public func forward(_ event: TransportEvent) {
-        target.withLock { $0 }?(event)
+        target.withLock { $0 }?.handle(event)
     }
 }
 

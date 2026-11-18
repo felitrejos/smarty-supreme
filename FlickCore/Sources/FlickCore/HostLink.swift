@@ -5,6 +5,7 @@ public final class HostLink: Sendable {
     public static let pingInterval: Microseconds = 1_000_000
     public static let roundTripHistory = 600
     private static let pointerRateWindow: Microseconds = 1_000_000
+    private static let recentRoundTrips = 5
 
     public struct ReceivedSwing: Equatable, Sendable {
         public let macPeakTime: Microseconds?
@@ -14,7 +15,18 @@ public final class HostLink: Sendable {
 
     public struct PaddleInput: Equatable, Sendable {
         public let position: Double?
+        public let lastPointerAt: Microseconds?
         public let swings: [ReceivedSwing]
+        public let isCalibrated: Bool
+        public let isReady: Bool
+        public let pauseRequests: [Bool]
+        public let roundTrip: Microseconds?
+    }
+
+    public struct Input: Equatable, Sendable {
+        public let paddles: [Side: PaddleInput]
+        public let vacant: Set<Side>
+        public let viewerName: String?
     }
 
     public struct ConnectedPaddle: Equatable, Sendable {
@@ -28,14 +40,21 @@ public final class HostLink: Sendable {
         public let peerAheadOfMac: Int64?
         public let swingCount: Int
         public let lastSwing: ReceivedSwing?
+        public let isReady: Bool
+    }
+
+    public struct WaitingPhone: Equatable, Sendable {
+        public let peer: PeerID
+        public let name: String
     }
 
     private struct Paddle: Sendable {
         let name: String
-        let side: Side
+        var side: Side
         var sensitivity: Sensitivity?
         var position: Double?
         var lastPointerSequence: UInt32?
+        var lastPointerAt: Microseconds?
         var pointerArrivals: [Microseconds] = []
         var clockSync = ClockSync()
         var roundTrips: [Microseconds] = []
@@ -44,25 +63,47 @@ public final class HostLink: Sendable {
         var swingCount = 0
         var lastSwing: ReceivedSwing?
         var untakenSwings: [ReceivedSwing] = []
+        var isReady = false
+        var untakenPauseRequests: [Bool] = []
 
         init(name: String, side: Side) {
             self.name = name
             self.side = side
         }
+
+        var recentRoundTrip: Microseconds? {
+            let recent = roundTrips.suffix(HostLink.recentRoundTrips).sorted()
+            return recent.isEmpty ? nil : recent[recent.count / 2]
+        }
     }
 
-    private struct WaitingPhone: Sendable {
+    private struct Vacancy: Sendable {
+        let peer: PeerID
+        let paddle: Paddle
+    }
+
+    private struct Viewer: Sendable {
         let peer: PeerID
         let name: String
     }
 
     private struct State: Sendable {
         var paddles: [PeerID: Paddle] = [:]
+        var vacancies: [Side: Vacancy] = [:]
         var waiting: [WaitingPhone] = []
+        var viewer: Viewer?
+        var isHoldingSlots = false
+        var playableSides = Set(Side.allCases)
         var outbox = Outbox()
 
         var freeSide: Side? {
-            Side.allCases.first { side in !paddles.values.contains { $0.side == side } }
+            Side.allCases.first { side in
+                playableSides.contains(side) && vacancies[side] == nil && !paddles.values.contains { $0.side == side }
+            }
+        }
+
+        func peer(on side: Side) -> PeerID? {
+            paddles.first { $0.value.side == side }?.key
         }
     }
 
@@ -92,33 +133,110 @@ public final class HostLink: Sendable {
                         roundTrips: paddle.roundTrips,
                         peerAheadOfMac: paddle.clockSync.peerAheadOfMac,
                         swingCount: paddle.swingCount,
-                        lastSwing: paddle.lastSwing
+                        lastSwing: paddle.lastSwing,
+                        isReady: paddle.isReady
                     )
                 }
                 .sorted { $0.side.rawValue < $1.side.rawValue }
         }
     }
 
-    public var waitingNames: [String] {
-        state.withLock { $0.waiting.map(\.name) }
+    public var waiting: [WaitingPhone] {
+        state.withLock { $0.waiting }
     }
 
-    public func takeInput() -> [Side: PaddleInput] {
+    public var waitingNames: [String] {
+        waiting.map(\.name)
+    }
+
+    public var viewerName: String? {
+        state.withLock { $0.viewer?.name }
+    }
+
+    public func takeInput() -> Input {
         state.withLock { state in
-            var input: [Side: PaddleInput] = [:]
+            var paddles: [Side: PaddleInput] = [:]
             for (peer, paddle) in state.paddles {
-                input[paddle.side] = PaddleInput(position: paddle.position, swings: paddle.untakenSwings)
+                paddles[paddle.side] = PaddleInput(
+                    position: paddle.position,
+                    lastPointerAt: paddle.lastPointerAt,
+                    swings: paddle.untakenSwings,
+                    isCalibrated: paddle.sensitivity != nil,
+                    isReady: paddle.isReady,
+                    pauseRequests: paddle.untakenPauseRequests,
+                    roundTrip: paddle.recentRoundTrip
+                )
                 state.paddles[peer]?.untakenSwings.removeAll()
+                state.paddles[peer]?.untakenPauseRequests.removeAll()
             }
-            return input
+            return Input(paddles: paddles, vacant: Set(state.vacancies.keys), viewerName: state.viewer?.name)
         }
     }
 
-    public func send(_ haptic: HapticKind, to side: Side) {
+    public func send(_ message: Message, to side: Side) {
         let now = clock.now
         state.withLock { state in
-            guard let peer = state.paddles.first(where: { $0.value.side == side })?.key else { return }
-            state.outbox.send(.haptic(haptic), to: peer, at: now, over: transport)
+            guard let peer = state.peer(on: side) else { return }
+            state.outbox.send(message, to: peer, at: now, over: transport)
+        }
+    }
+
+    public func sendToViewer(_ snapshot: TableSnapshot) {
+        let now = clock.now
+        state.withLock { state in
+            guard let viewer = state.viewer else { return }
+            state.outbox.send(.snapshot(snapshot), to: viewer.peer, at: now, over: transport)
+        }
+    }
+
+    public func setPlayableSides(_ sides: Set<Side>) {
+        let now = clock.now
+        state.withLock { state in
+            state.playableSides = sides
+            for (peer, paddle) in state.paddles where !sides.contains(paddle.side) {
+                state.paddles[peer] = nil
+                state.waiting.append(WaitingPhone(peer: peer, name: paddle.name))
+                state.outbox.send(.bye(.gameFull), to: peer, at: now, over: transport)
+            }
+            while state.freeSide != nil, !state.waiting.isEmpty {
+                admitWaitingPhone(in: &state)
+            }
+        }
+    }
+
+    public func holdSlots(_ hold: Bool) {
+        state.withLock { state in
+            state.isHoldingSlots = hold
+            guard !hold else { return }
+            state.vacancies.removeAll()
+            while state.freeSide != nil, !state.waiting.isEmpty {
+                admitWaitingPhone(in: &state)
+            }
+        }
+    }
+
+    public func fillVacancy(_ side: Side, with peer: PeerID) {
+        state.withLock { state in
+            guard state.vacancies[side] != nil, let index = state.waiting.firstIndex(where: { $0.peer == peer }) else { return }
+            let phone = state.waiting.remove(at: index)
+            state.vacancies[side] = nil
+            admit(phone.peer, named: phone.name, as: side, in: &state)
+        }
+    }
+
+    public func swapSides() {
+        state.withLock { state in
+            for (peer, paddle) in state.paddles {
+                state.paddles[peer]?.side = paddle.side.opponent
+            }
+        }
+    }
+
+    public func resetReadiness() {
+        state.withLock { state in
+            for peer in state.paddles.keys {
+                state.paddles[peer]?.isReady = false
+            }
         }
     }
 
@@ -164,8 +282,14 @@ public final class HostLink: Sendable {
         case .hello(let phoneName):
             greet(sender, named: phoneName, in: &state)
             return
+        case .viewerHello(let viewerName):
+            greetViewer(sender, named: viewerName, in: &state)
+            return
         case .bye:
             forget(sender, in: &state)
+            return
+        case .ping where state.viewer?.peer == sender:
+            state.outbox.send(.pong(pingSentAt: packet.sentAt, receivedAt: receivedAt), to: sender, at: clock.now, over: transport)
             return
         default:
             break
@@ -191,6 +315,7 @@ public final class HostLink: Sendable {
             if paddle.lastPointerSequence.map({ SequenceNumber.isNewer(packet.sequence, than: $0) }) ?? true {
                 paddle.lastPointerSequence = packet.sequence
                 paddle.position = Double(position)
+                paddle.lastPointerAt = receivedAt
             }
         case .swing(let swing):
             let received = ReceivedSwing(
@@ -203,6 +328,10 @@ public final class HostLink: Sendable {
             paddle.untakenSwings.append(received)
         case .calibrated(let sensitivity):
             paddle.sensitivity = sensitivity
+        case .ready(let isReady):
+            paddle.isReady = isReady
+        case .pause(let pause):
+            paddle.untakenPauseRequests.append(pause)
         default:
             return
         }
@@ -211,6 +340,11 @@ public final class HostLink: Sendable {
 
     private func greet(_ peer: PeerID, named phoneName: String, in state: inout State) {
         if state.paddles[peer] != nil {
+            state.outbox.send(.helloAck(name: name), to: peer, at: clock.now, over: transport)
+            return
+        }
+        if let side = state.vacancies.first(where: { $0.value.peer == peer })?.key, let vacancy = state.vacancies.removeValue(forKey: side) {
+            state.paddles[peer] = vacancy.paddle
             state.outbox.send(.helloAck(name: name), to: peer, at: clock.now, over: transport)
             return
         }
@@ -224,10 +358,31 @@ public final class HostLink: Sendable {
         admit(peer, named: phoneName, as: side, in: &state)
     }
 
+    private func greetViewer(_ peer: PeerID, named viewerName: String, in state: inout State) {
+        guard state.viewer == nil || state.viewer?.peer == peer else {
+            state.outbox.send(.bye(.gameFull), to: peer, at: clock.now, over: transport)
+            return
+        }
+        state.viewer = Viewer(peer: peer, name: viewerName)
+        state.outbox.send(.helloAck(name: name), to: peer, at: clock.now, over: transport)
+    }
+
     private func forget(_ peer: PeerID, in state: inout State) {
         state.waiting.removeAll { $0.peer == peer }
-        guard state.paddles.removeValue(forKey: peer) != nil else { return }
-        admitWaitingPhone(in: &state)
+        if state.viewer?.peer == peer {
+            state.viewer = nil
+            return
+        }
+        guard var paddle = state.paddles.removeValue(forKey: peer) else { return }
+        if state.isHoldingSlots {
+            paddle.untakenSwings.removeAll()
+            paddle.untakenPauseRequests.removeAll()
+            paddle.position = nil
+            paddle.lastPointerAt = nil
+            state.vacancies[paddle.side] = Vacancy(peer: peer, paddle: paddle)
+        } else {
+            admitWaitingPhone(in: &state)
+        }
     }
 
     private func admitWaitingPhone(in state: inout State) {

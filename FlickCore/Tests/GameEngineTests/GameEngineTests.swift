@@ -307,6 +307,43 @@ struct GameEngineTests {
     }
 }
 
+struct ForfeitTests {
+    @Test func aForfeitMidRallyEndsTheGameWithTheScoreSoFar() {
+        var game = GameState(seed: 1, config: straightServes())
+        _ = game.step(StepInput(swings: [serve(.playerA, in: game)]))
+        _ = game.run(until: scoredAPoint)
+        _ = game.run(until: { state, _ in state.phase == .rally }, input: returning(.playerA))
+
+        let events = game.step(StepInput(command: .forfeit(.playerA)))
+
+        #expect(events == [.gameOver(winner: .playerB)])
+        #expect(game.phase == .gameOver(winner: .playerB))
+        #expect(game.score == Score(a: 1, b: 0))
+    }
+
+    @Test func aForfeitWhilePausedEndsTheGameAndResumeDoesNothing() {
+        var game = GameState(seed: 1)
+        _ = game.step(StepInput(command: .pause))
+
+        let forfeit = game.step(StepInput(command: .forfeit(.playerB)))
+        let resume = game.step(StepInput(command: .resume))
+
+        #expect(forfeit == [.gameOver(winner: .playerA)])
+        #expect(resume.isEmpty)
+        #expect(game.phase == .gameOver(winner: .playerA))
+    }
+
+    @Test func aForfeitAfterTheGameIsOverChangesNothing() {
+        var game = GameState(seed: 1)
+        _ = game.step(StepInput(command: .forfeit(.playerB)))
+
+        let again = game.step(StepInput(command: .forfeit(.playerA)))
+
+        #expect(again.isEmpty)
+        #expect(game.phase == .gameOver(winner: .playerA))
+    }
+}
+
 struct ScoreTests {
     @Test(arguments: [
         (11, 9, Side.playerA as Side?), (11, 10, nil), (12, 10, .playerA), (10, 12, .playerB), (9, 11, .playerB), (10, 10, nil),

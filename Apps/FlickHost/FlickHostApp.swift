@@ -8,12 +8,19 @@ struct FlickHostApp: App {
 
     var body: some Scene {
         Window("Flick Pong", id: "game") {
-            GameView(match: controller.match, stats: stats, showsFrameTimes: showsFrameTimes)
-                .frame(minWidth: 900, minHeight: 600)
-                .onAppear(perform: controller.start)
+            Group {
+                switch controller.role {
+                case .host:
+                    GameView(match: controller.match, stats: stats, showsFrameTimes: showsFrameTimes)
+                case .viewer(let viewer):
+                    ViewerView(viewer: viewer, stats: stats, showsFrameTimes: showsFrameTimes)
+                }
+            }
+            .frame(minWidth: 900, minHeight: 600)
+            .onAppear(perform: controller.start)
         }
         .commands {
-            GameCommands(match: controller.match, showsFrameTimes: $showsFrameTimes)
+            GameCommands(controller: controller, showsFrameTimes: $showsFrameTimes)
         }
 
         Window("iPhone Paddles", id: "paddles") {

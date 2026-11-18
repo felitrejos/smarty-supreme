@@ -17,6 +17,9 @@ struct PaddleView: View {
     private func content(_ snapshot: PaddleSensing.Snapshot) -> some View {
         VStack(spacing: 24) {
             LinkHeader(link: controller.link, launchedAt: controller.launchedAt, networkFailure: controller.networkFailure.latest)
+            if let state = controller.link.gameState {
+                MatchPanel(state: state, controller: controller)
+            }
             if isMotionAvailable {
                 Text(status(snapshot))
                     .font(.headline)
@@ -70,6 +73,117 @@ struct PaddleView: View {
         case .calibrated:
             return snapshot.reading == .notUpright ? "Hold it upright" : "Tilt to move, swing to hit. Double-tap to recalibrate."
         }
+    }
+}
+
+private struct MatchPanel: View {
+    let state: GameStateUpdate
+    let controller: PaddleController
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(state.side.color)
+                    .frame(width: 18, height: 4)
+                Text("You’re \(state.side.playerName)")
+                    .font(.headline)
+                Spacer()
+                if showsScore {
+                    Text("\(score(of: state.side)) – \(score(of: state.side.opponent))")
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                        .accessibilityLabel("You \(score(of: state.side)), opponent \(score(of: state.side.opponent))")
+                }
+            }
+            action
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private var action: some View {
+        switch state.phase {
+        case .calibrating:
+            Text("Calibrate below, then tap Ready.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .lobby:
+            VStack(spacing: 8) {
+                if state.connectionIsSlow {
+                    slowConnection
+                }
+                wideButton("Ready", prominent: true) { controller.link.setReady(true) }
+            }
+        case .ready:
+            VStack(spacing: 8) {
+                Label("Ready. The match starts when both players are.", systemImage: "checkmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.green)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if state.connectionIsSlow {
+                    slowConnection
+                }
+                wideButton("Not Ready", prominent: false) { controller.link.setReady(false) }
+            }
+        case .serving, .rally, .pointScored:
+            wideButton("Pause", prominent: false) { controller.link.requestPause(true) }
+        case .paused:
+            if state.canResume {
+                wideButton("Continue", prominent: true) { controller.link.requestPause(false) }
+            } else {
+                Text("Paused. Waiting for the other player or the Mac.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .gameOver:
+            Text(state.winner == state.side ? "You won" : "You lost")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var slowConnection: some View {
+        Label("Slow connection. Move closer to the Wi‑Fi router.", systemImage: "exclamationmark.triangle.fill")
+            .font(.footnote)
+            .foregroundStyle(.orange)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var showsScore: Bool {
+        switch state.phase {
+        case .calibrating, .lobby, .ready: false
+        case .serving, .rally, .pointScored, .paused, .gameOver: true
+        }
+    }
+
+    private func score(of side: Side) -> Int {
+        Int(side == .playerA ? state.scoreA : state.scoreB)
+    }
+
+    @ViewBuilder
+    private func wideButton(_ title: String, prominent: Bool, action: @escaping () -> Void) -> some View {
+        if prominent {
+            Button(action: action) { Text(title).frame(maxWidth: .infinity) }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+        } else {
+            Button(action: action) { Text(title).frame(maxWidth: .infinity) }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+        }
+    }
+}
+
+private extension Side {
+    var playerName: String {
+        self == .playerA ? "Player A" : "Player B"
+    }
+
+    var color: Color {
+        self == .playerA ? Color(red: 0.12, green: 0.36, blue: 0.86) : Color(red: 0.84, green: 0.16, blue: 0.16)
     }
 }
 

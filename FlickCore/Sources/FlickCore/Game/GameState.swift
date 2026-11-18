@@ -71,8 +71,7 @@ public struct GameState: Equatable, Sendable {
     }
 
     public func paddlePosition(of side: Side) -> Double {
-        let half = config.paddleWidth / 2
-        return (paddle(side).x - half) / (config.tableWidth - 2 * half)
+        config.position(ofPaddleX: paddle(side).x)
     }
 
     public mutating func step(_ input: StepInput) -> [GameEvent] {
@@ -123,6 +122,12 @@ public struct GameState: Equatable, Sendable {
             phaseBeforePause = nil
             phase = previous
             events.append(.resumed)
+        case .forfeit(let side):
+            if case .gameOver = phase { return }
+            phaseBeforePause = nil
+            pendingPoint = nil
+            phase = .gameOver(winner: side.opponent)
+            events.append(.gameOver(winner: side.opponent))
         case nil:
             return
         }

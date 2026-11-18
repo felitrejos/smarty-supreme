@@ -1,7 +1,7 @@
 import Foundation
 
 public enum MessageCodec {
-    public static let protocolVersion: UInt8 = 1
+    public static let protocolVersion: UInt8 = 2
 
     private enum TypeCode: UInt8 {
         case hello = 1
@@ -15,6 +15,9 @@ public enum MessageCodec {
         case haptic
         case gameState
         case bye
+        case viewerHello
+        case pause
+        case snapshot
     }
 
     public static func encode(_ packet: Packet) -> Data {
@@ -53,12 +56,15 @@ public enum MessageCodec {
         case .haptic: .haptic
         case .gameState: .gameState
         case .bye: .bye
+        case .viewerHello: .viewerHello
+        case .pause: .pause
+        case .snapshot: .snapshot
         }
     }
 
     private static func writePayload(of message: Message, into writer: inout ByteWriter) {
         switch message {
-        case .hello(let name), .helloAck(let name):
+        case .hello(let name), .helloAck(let name), .viewerHello(let name):
             writer.append(name)
         case .calibrated(let sensitivity):
             writer.append(UInt8(sensitivity.rangeDegrees))
@@ -70,8 +76,8 @@ public enum MessageCodec {
             writer.append(swing.direction.x)
             writer.append(swing.direction.y)
             writer.append(swing.direction.z)
-        case .ready(let isReady):
-            writer.append(UInt8(isReady ? 1 : 0))
+        case .ready(let flag), .pause(let flag):
+            writer.append(flag)
         case .ping:
             break
         case .pong(let pingSentAt, let receivedAt):
@@ -85,8 +91,24 @@ public enum MessageCodec {
             writer.append(state.scoreB)
             writer.append(state.side.rawValue)
             writer.append(state.serving.rawValue)
+            writer.append(state.canResume)
+            writer.append(state.connectionIsSlow)
+            writer.append(state.winner)
         case .bye(let reason):
             writer.append(reason.rawValue)
+        case .snapshot(let snapshot):
+            writer.append(snapshot.step)
+            writer.append(snapshot.ball)
+            writer.append(snapshot.velocity)
+            writer.append(snapshot.shotStart)
+            writer.append(snapshot.paddleA)
+            writer.append(snapshot.paddleB)
+            writer.append(snapshot.phase.rawValue)
+            writer.append(snapshot.scoreA)
+            writer.append(snapshot.scoreB)
+            writer.append(snapshot.serving.rawValue)
+            writer.append(snapshot.rally)
+            writer.append(snapshot.winner)
         }
     }
 
@@ -110,11 +132,9 @@ public enum MessageCodec {
             let direction = SIMD3(try reader.finiteFloat(), try reader.finiteFloat(), try reader.finiteFloat())
             return .swing(SwingMessage(peakAt: peakAt, strength: strength, direction: direction))
         case .ready:
-            switch try reader.byte() {
-            case 0: return .ready(false)
-            case 1: return .ready(true)
-            default: throw .invalidPayload
-            }
+            return .ready(try reader.flag())
+        case .pause:
+            return .pause(try reader.flag())
         case .ping:
             return .ping
         case .pong:
@@ -127,10 +147,30 @@ public enum MessageCodec {
                 scoreA: try reader.byte(),
                 scoreB: try reader.byte(),
                 side: try reader.enumeration(Side.self),
-                serving: try reader.enumeration(Side.self)
+                serving: try reader.enumeration(Side.self),
+                canResume: try reader.flag(),
+                connectionIsSlow: try reader.flag(),
+                winner: try reader.optionalSide()
             ))
         case .bye:
             return .bye(try reader.enumeration(ByeReason.self))
+        case .viewerHello:
+            return .viewerHello(name: try reader.string())
+        case .snapshot:
+            return .snapshot(TableSnapshot(
+                step: try reader.uint64(),
+                ball: try reader.finitePair(),
+                velocity: try reader.finitePair(),
+                shotStart: try reader.finitePair(),
+                paddleA: try reader.finiteFloat(),
+                paddleB: try reader.finiteFloat(),
+                phase: try reader.enumeration(GamePhase.self),
+                scoreA: try reader.byte(),
+                scoreB: try reader.byte(),
+                serving: try reader.enumeration(Side.self),
+                rally: try reader.uint32(),
+                winner: try reader.optionalSide()
+            ))
         }
     }
 }
@@ -154,6 +194,19 @@ private struct ByteWriter {
         append(value.bitPattern)
     }
 
+    mutating func append(_ value: SIMD2<Float>) {
+        append(value.x)
+        append(value.y)
+    }
+
+    mutating func append(_ flag: Bool) {
+        append(UInt8(flag ? 1 : 0))
+    }
+
+    mutating func append(_ side: Side?) {
+        append(side?.rawValue ?? ByteReader.noSide)
+    }
+
     mutating func append(_ value: String) {
         let bytes = Array(value.utf8)
         precondition(bytes.count <= Int(UInt8.max), "Names are limited to 255 bytes")
@@ -163,6 +216,8 @@ private struct ByteWriter {
 }
 
 private struct ByteReader {
+    static let noSide: UInt8 = 0xFF
+
     private let bytes: [UInt8]
     private var offset = 0
 
@@ -191,6 +246,25 @@ private struct ByteReader {
         let value = Float(bitPattern: try uint32())
         guard value.isFinite else { throw .invalidPayload }
         return value
+    }
+
+    mutating func finitePair() throws(MessageDecodingError) -> SIMD2<Float> {
+        SIMD2(try finiteFloat(), try finiteFloat())
+    }
+
+    mutating func optionalSide() throws(MessageDecodingError) -> Side? {
+        let raw = try byte()
+        guard raw != Self.noSide else { return nil }
+        guard let side = Side(rawValue: raw) else { throw .invalidPayload }
+        return side
+    }
+
+    mutating func flag() throws(MessageDecodingError) -> Bool {
+        switch try byte() {
+        case 0: return false
+        case 1: return true
+        default: throw .invalidPayload
+        }
     }
 
     mutating func unitFloat() throws(MessageDecodingError) -> Float {

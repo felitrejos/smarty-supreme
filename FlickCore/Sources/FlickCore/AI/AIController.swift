@@ -28,7 +28,7 @@ public struct AIController: Sendable {
         let current = game.paddleX(of: side)
         switch game.phase {
         case .paused, .gameOver:
-            return Move(target: position(of: current, in: game.config), swing: nil)
+            return Move(target: game.config.position(ofPaddleX: current), swing: nil)
         case .serving, .rally, .pointScored:
             break
         }
@@ -55,7 +55,7 @@ public struct AIController: Sendable {
             }
         }
         let next = moved(current, toward: goal, in: game.config)
-        return Move(target: position(of: next, in: game.config), swing: swing)
+        return Move(target: game.config.position(ofPaddleX: next), swing: swing)
     }
 
     private func isApproaching(in game: GameState) -> Bool {
@@ -89,11 +89,6 @@ public struct AIController: Sendable {
     private func moved(_ x: Double, toward goal: Double, in config: GameConfig) -> Double {
         let maximumMove = profile.paddleSpeedInTableWidths * config.tableWidth / Double(config.stepsPerSecond)
         return x + min(max(goal - x, -maximumMove), maximumMove)
-    }
-
-    private func position(of x: Double, in config: GameConfig) -> Double {
-        let half = config.paddleWidth / 2
-        return (x - half) / (config.tableWidth - 2 * half)
     }
 
     private func steps(_ seconds: Double, in config: GameConfig) -> UInt64 {

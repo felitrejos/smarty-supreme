@@ -30,21 +30,35 @@ struct GameView: View {
                 scene.show(match.camera, animated: false)
                 stage.scene = scene
                 stage.updates = content.subscribe(to: SceneEvents.Update.self) { event in
-                    let events = match.advance(by: event.deltaTime)
-                    scene.update(from: match.game, events: events, elapsed: event.deltaTime)
+                    let events = match.advance()
+                    scene.update(to: TablePose(game: match.game, events: events, dimmed: match.dimmed), elapsed: event.deltaTime)
                     stats.record(event.deltaTime)
                 }
             } catch {
                 stage.failure = "The table couldn’t be set up: \(error.localizedDescription)"
             }
         }
+        .accessibilityLabel("Table tennis table")
+        .accessibilityValue(subtitle)
+        .overlay {
+            if showsCard {
+                Color.black.opacity(0.28)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
+            }
+        }
         .overlay(alignment: .top) {
-            Scoreboard(score: match.score, server: server, name: match.name(of:))
+            Scoreboard(score: match.score, server: server, leading: .playerA, name: match.name(of:))
                 .padding(.top, 16)
         }
         .overlay {
             if case .gameOver(let winner) = match.phase {
                 WinnerCard(winner: match.name(of: winner), score: match.score, playAgain: match.playAgain)
+            } else if case .interrupted(let interruption) = match.stage {
+                InterruptionCard(match: match, interruption: interruption)
+            } else if !match.hasStarted {
+                LobbyCard(match: match)
             } else if let failure = stage.failure {
                 Text(failure)
                     .padding(16)
@@ -52,7 +66,7 @@ struct GameView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if match.showsControls {
+            if match.showsControls, !match.isPaused {
                 ControlsHint(name: match.name(of:), controls: controls(for:))
                     .padding(.bottom, 24)
                     .transition(.opacity)
@@ -68,10 +82,9 @@ struct GameView: View {
         .sheet(isPresented: Binding(get: { match.isChoosingNewGame }, set: { if !$0 { match.cancelNewGame() } })) {
             NewGameSheet(setup: match.setup, start: match.start, cancel: match.cancelNewGame)
         }
+        .animation(.easeOut(duration: 0.25), value: showsCard)
         .navigationTitle("Flick Pong")
         .navigationSubtitle(subtitle)
-        .accessibilityLabel("Table tennis table")
-        .accessibilityValue(subtitle)
         .focusable()
         .focusEffectDisabled()
         .focused($isFocused)
@@ -97,20 +110,31 @@ struct GameView: View {
         }
     }
 
+    private var showsCard: Bool {
+        match.isPaused || match.isGameOver || !match.hasStarted
+    }
+
     private var server: Side? {
         if case .serving(let side, _) = match.phase { return side }
         return nil
     }
 
     private func controls(for side: Side) -> PlayerControls {
-        switch side {
-        case .playerA: match.isPhonePlaying ? .phone : .keyboard(move: ["A", "D"], swing: "W")
-        case .playerB: match.setup.opponent == .computer ? .computer(match.setup.difficulty) : .keyboard(move: ["←", "→"], swing: "↑")
+        switch match.controller(of: side) {
+        case .phone: .phone
+        case .computer: .computer(match.setup.difficulty)
+        case .local: side == .playerA ? .keyboard(move: ["A", "D"], swing: "W") : .keyboard(move: ["←", "→"], swing: "↑")
         }
     }
 
     private var subtitle: String {
-        switch match.phase {
+        switch match.stage {
+        case .lobby: return "Waiting for players"
+        case .countdown: return "Starting"
+        case .interrupted: return "Paused"
+        case .playing, .over: break
+        }
+        return switch match.phase {
         case .serving(let server, _): "\(match.name(of: server)) to serve"
         case .rally: match.rally < 2 ? "Rally" : "Rally of \(match.rally)"
         case .pointScored: "Point"
@@ -145,19 +169,20 @@ extension View {
     }
 }
 
-private struct Scoreboard: View {
+struct Scoreboard: View {
     let score: Score
     let server: Side?
+    let leading: Side
     let name: (Side) -> String
 
     var body: some View {
         HStack(spacing: 22) {
-            player(.playerA)
+            player(leading)
             Text("–")
                 .font(.title3)
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
-            player(.playerB)
+            player(leading.opponent)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
@@ -170,10 +195,10 @@ private struct Scoreboard: View {
         let isServing = server == side
         let name = name(side)
         return HStack(spacing: 10) {
-            if side == .playerB {
+            if side != leading {
                 Text("\(score)").scoreFigure()
             }
-            VStack(alignment: side == .playerA ? .trailing : .leading, spacing: 3) {
+            VStack(alignment: side == leading ? .trailing : .leading, spacing: 3) {
                 Text(name)
                     .font(.callout.weight(.medium))
                 Capsule()
@@ -181,7 +206,7 @@ private struct Scoreboard: View {
                     .frame(width: isServing ? 26 : 14, height: 3)
                     .animation(.easeOut(duration: 0.25), value: isServing)
             }
-            if side == .playerA {
+            if side == leading {
                 Text("\(score)").scoreFigure()
             }
         }

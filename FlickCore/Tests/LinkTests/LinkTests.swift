@@ -259,12 +259,12 @@ struct LinkTests {
         let input = harness.host.takeInput()
         let afterwards = harness.host.takeInput()
 
-        #expect(input[.playerA]?.position == 0.25)
-        #expect(input[.playerA]?.swings.map { Float($0.strength) } == [0.2, 0.4])
-        #expect(input[.playerB]?.position == 0.75)
-        #expect(input[.playerB]?.swings.isEmpty == true)
-        #expect(afterwards[.playerA]?.swings.isEmpty == true)
-        #expect(afterwards[.playerA]?.position == 0.25)
+        #expect(input.paddles[.playerA]?.position == 0.25)
+        #expect(input.paddles[.playerA]?.swings.map { Float($0.strength) } == [0.2, 0.4])
+        #expect(input.paddles[.playerB]?.position == 0.75)
+        #expect(input.paddles[.playerB]?.swings.isEmpty == true)
+        #expect(afterwards.paddles[.playerA]?.swings.isEmpty == true)
+        #expect(afterwards.paddles[.playerA]?.position == 0.25)
     }
 
     @Test func aHapticReachesOnlyThePhoneOnThatSide() {
@@ -276,8 +276,8 @@ struct LinkTests {
         _ = harness.addPhone("Phone B", onHaptic: hapticsB.record)
         harness.run(for: 50_000)
 
-        harness.host.send(.hit, to: .playerB)
-        harness.host.send(.win, to: .playerB)
+        harness.host.send(.haptic(.hit), to: .playerB)
+        harness.host.send(.haptic(.win), to: .playerB)
         harness.run(for: 50_000)
 
         #expect(hapticsA.kinds.isEmpty)

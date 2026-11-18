@@ -12,6 +12,7 @@ final class MultipeerTransport: NSObject, Transport, @unchecked Sendable {
     private struct State {
         var isRunning = false
         var isInviting = false
+        var invitedHost: ImmutablePeerID?
         var connected: [PeerID: ImmutablePeerID] = [:]
     }
 
@@ -58,6 +59,7 @@ final class MultipeerTransport: NSObject, Transport, @unchecked Sendable {
             guard state.isRunning else { return false }
             state.isRunning = false
             state.isInviting = false
+            state.invitedHost = nil
             advertiser?.stopAdvertisingPeer()
             browser?.stopBrowsingForPeers()
             return true
@@ -83,6 +85,7 @@ private struct ImmutablePeerID: @unchecked Sendable {
 
 extension MultipeerTransport: MCSessionDelegate {
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange change: MCSessionState) {
+        guard acceptsEvents(from: peerID) else { return }
         let peer = PeerID(peerID.displayName)
         switch change {
         case .connected:
@@ -96,6 +99,7 @@ extension MultipeerTransport: MCSessionDelegate {
             let wasConnected = state.withLock { state in
                 let wasConnected = state.connected.removeValue(forKey: peer) != nil
                 state.isInviting = false
+                state.invitedHost = nil
                 if state.isRunning, state.connected.isEmpty, let browser {
                     browser.stopBrowsingForPeers()
                     browser.startBrowsingForPeers()
@@ -113,7 +117,12 @@ extension MultipeerTransport: MCSessionDelegate {
     }
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
+        guard acceptsEvents(from: peerID) else { return }
         onEvent(.received(data, from: PeerID(peerID.displayName)))
+    }
+
+    private func acceptsEvents(from peerID: MCPeerID) -> Bool {
+        browser == nil || state.withLock { $0.invitedHost?.peerID == peerID }
     }
 
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
@@ -138,6 +147,7 @@ extension MultipeerTransport: MCNearbyServiceBrowserDelegate {
         let shouldInvite = state.withLock { state in
             guard state.isRunning, !state.isInviting, state.connected.isEmpty else { return false }
             state.isInviting = true
+            state.invitedHost = ImmutablePeerID(peerID: peerID)
             return true
         }
         if shouldInvite {

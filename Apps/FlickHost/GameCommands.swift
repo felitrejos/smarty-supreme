@@ -1,23 +1,34 @@
 import SwiftUI
 
 struct GameCommands: Commands {
-    let match: Match
+    let controller: HostController
     @Binding var showsFrameTimes: Bool
+
+    private var match: Match {
+        controller.match
+    }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Game…", action: match.chooseNewGame)
                 .keyboardShortcut("n")
+                .disabled(controller.isViewer)
+            Divider()
+            Toggle("Use as Player B’s Screen", isOn: Binding(get: { controller.isViewer }, set: controller.setViewer))
+                .disabled(!controller.isViewer && match.hasStarted && !match.isGameOver)
         }
         CommandMenu("Game") {
             Button(match.isPaused ? "Resume" : "Pause", action: match.togglePause)
                 .keyboardShortcut(.escape, modifiers: [])
-                .disabled(match.isGameOver || match.isChoosingNewGame)
+                .disabled(controller.isViewer || !match.hasStarted || match.isGameOver || match.isChoosingNewGame || match.isWaitingForADevice)
+            Button("Swap Sides", action: match.swapSides)
+                .disabled(controller.isViewer || match.hasStarted)
         }
         CommandGroup(before: .toolbar) {
             ForEach(CameraView.allCases, id: \.self) { camera in
                 Toggle(camera.title, isOn: Binding(get: { match.camera == camera }, set: { if $0 { match.camera = camera } }))
                     .keyboardShortcut(camera.shortcut)
+                    .disabled(controller.isViewer)
             }
             Divider()
             Toggle("Show Frame Times", isOn: $showsFrameTimes)

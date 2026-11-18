@@ -15,8 +15,26 @@ struct MessageCodecTests {
         .ping,
         .pong(pingSentAt: 1_000_000, receivedAt: 5_010_000),
         .haptic(.point),
-        .gameState(GameStateUpdate(phase: .rally, scoreA: 7, scoreB: 10, side: .playerB, serving: .playerA)),
+        .gameState(GameStateUpdate(phase: .rally, scoreA: 7, scoreB: 10, side: .playerB, serving: .playerA, canResume: false, connectionIsSlow: true, winner: nil)),
+        .gameState(GameStateUpdate(phase: .gameOver, scoreA: 5, scoreB: 3, side: .playerA, serving: .playerB, canResume: true, connectionIsSlow: false, winner: .playerB)),
         .bye(.gameFull),
+        .viewerHello(name: "Studio Mac"),
+        .pause(true),
+        .pause(false),
+        .snapshot(TableSnapshot(
+            step: 9_000_000_001,
+            ball: SIMD2(0.31, 0.72),
+            velocity: SIMD2(-0.4, 1.2),
+            shotStart: SIMD2(0.2, 0.05),
+            paddleA: 0.18,
+            paddleB: 0.44,
+            phase: .rally,
+            scoreA: 9,
+            scoreB: 10,
+            serving: .playerB,
+            rally: 70_000,
+            winner: .playerA
+        )),
     ]
 
     @Test(arguments: everyMessage)
@@ -87,6 +105,14 @@ struct MessageCodecTests {
         (5, zeros8 + [0x00, 0x00, 0x00, 0x40] + zeros12),
         (5, zeros8 + notANumber + zeros12),
         (5, zeros8 + zeros8 + infinity + zeros8),
+        (10, [4, 0, 0, 0, 0, 2, 0, 0xFF]),
+        (10, [4, 0, 0, 0, 0, 0, 2, 0xFF]),
+        (10, [4, 0, 0, 0, 0, 0, 0, 2]),
+        (13, [2]),
+        (14, zeros8 + notANumber + [UInt8](repeating: 0, count: 28) + [0, 0, 0, 0] + [0, 0, 0, 0, 0xFF]),
+        (14, [UInt8](repeating: 0, count: 36) + infinity + [0, 0, 0, 0] + [0, 0, 0, 0, 0xFF]),
+        (14, [UInt8](repeating: 0, count: 40) + [9, 0, 0, 0] + [0, 0, 0, 0, 0xFF]),
+        (14, [UInt8](repeating: 0, count: 40) + [0, 0, 0, 0] + [0, 0, 0, 0, 3]),
     ]
 
     @Test(arguments: invalidPayloads)

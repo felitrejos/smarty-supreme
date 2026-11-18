@@ -30,6 +30,9 @@ struct LobbyView: View {
                         }
                     }
                 }
+                Section("Player B’s Screen") {
+                    LabeledContent("Mac", value: controller.link.viewerName ?? "None")
+                }
                 if !waiting.isEmpty {
                     Section("Waiting for a Free Slot") {
                         ForEach(waiting, id: \.self) { Text($0) }
@@ -77,6 +80,7 @@ private struct PaddleRows: View {
                 .frame(width: 160)
         }
         LabeledContent("Tilt range", value: paddle.sensitivity.map { "±\(Int($0.rangeDegrees))°" } ?? "Not calibrated")
+        LabeledContent("Ready", value: paddle.isReady ? "Yes" : "No")
         LabeledContent("Swings", value: swingText)
     }
 

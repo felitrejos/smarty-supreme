@@ -51,6 +51,7 @@ public struct Swing: Equatable, Sendable {
 public enum GameCommand: Equatable, Sendable {
     case pause
     case resume
+    case forfeit(Side)
 }
 
 public struct StepInput: Sendable {

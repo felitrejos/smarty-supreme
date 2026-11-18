@@ -14,6 +14,7 @@ public final class PaddleLink: Sendable {
         var status = Status.searching
         var pairedAt: Microseconds?
         var sensitivity: Sensitivity?
+        var gameState: GameStateUpdate?
         var outbox = Outbox()
     }
 
@@ -38,6 +39,10 @@ public final class PaddleLink: Sendable {
         state.withLock { $0.pairedAt }
     }
 
+    public var gameState: GameStateUpdate? {
+        state.withLock { $0.gameState }
+    }
+
     public func handle(_ event: TransportEvent) {
         let receivedAt = clock.now
         let haptic = state.withLock { state -> HapticKind? in
@@ -50,6 +55,7 @@ public final class PaddleLink: Sendable {
             case .disconnected(let peer):
                 guard peer == state.host else { return nil }
                 state.host = nil
+                state.gameState = nil
                 if state.status != .refused(.versionMismatch) {
                     state.status = .searching
                 }
@@ -74,6 +80,14 @@ public final class PaddleLink: Sendable {
             strength: Float(swing.strength),
             direction: SIMD3<Float>(swing.direction)
         )))
+    }
+
+    public func setReady(_ isReady: Bool) {
+        sendWhilePaired(.ready(isReady))
+    }
+
+    public func requestPause(_ pause: Bool) {
+        sendWhilePaired(.pause(pause))
     }
 
     public func announceCalibration(_ sensitivity: Sensitivity) {
@@ -114,6 +128,8 @@ public final class PaddleLink: Sendable {
             send(.pong(pingSentAt: packet.sentAt, receivedAt: receivedAt), in: &state)
         case .haptic(let kind):
             return kind
+        case .gameState(let update):
+            state.gameState = update
         default:
             break
         }

@@ -43,6 +43,11 @@ public struct GameConfig: Equatable, Sendable {
         return half + min(max(position, 0), 1) * (tableWidth - 2 * half)
     }
 
+    public func position(ofPaddleX x: Double) -> Double {
+        let half = paddleWidth / 2
+        return (x - half) / (tableWidth - 2 * half)
+    }
+
     func steps(_ seconds: Double) -> UInt64 {
         UInt64((seconds * Double(stepsPerSecond)).rounded(.down))
     }

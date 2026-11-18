@@ -27,12 +27,12 @@ enum CameraView: CaseIterable {
 
 enum Opponent: String, CaseIterable {
     case computer
-    case keyboard
+    case player
 
     var title: String {
         switch self {
         case .computer: "Computer"
-        case .keyboard: "Second Player on This Keyboard"
+        case .player: "Another Player"
         }
     }
 }
@@ -54,6 +54,10 @@ struct MatchSetup {
     var opponent: Opponent
     var difficulty: Difficulty
 
+    var mode: MatchMode {
+        opponent == .computer ? .computer(difficulty) : .twoPlayers
+    }
+
     static func saved(in defaults: UserDefaults) -> MatchSetup {
         MatchSetup(
             opponent: defaults.string(forKey: opponentKey).flatMap(Opponent.init(rawValue:)) ?? .computer,
@@ -72,7 +76,6 @@ struct MatchSetup {
 final class Match {
     private static let keyboardStrength = 0.6
     private static let keyboardAim = 0.6
-    private static let longestFrame = 0.1
 
     private enum Direction {
         case left
@@ -90,86 +93,103 @@ final class Match {
         }
     }
 
-    @ObservationIgnored private(set) var game: GameState
+    @ObservationIgnored private(set) var session: HostSession
     private(set) var setup: MatchSetup
     private(set) var score = Score(a: 0, b: 0)
     private(set) var phase: GameState.Phase
     private(set) var rally = 0
-    private(set) var isPhonePlaying = false
+    private(set) var stage = MatchStage.lobby
+    private(set) var controllerA = HostSession.Controller.local
+    private(set) var controllerB = HostSession.Controller.local
+    private(set) var dimmed: Set<Side> = []
     private var controlsRequested = true
     var camera = CameraView.playerAEnd
     var isChoosingNewGame = false
 
-    @ObservationIgnored private let link: HostLink
+    @ObservationIgnored let link: HostLink
     @ObservationIgnored private let clock: any MonotonicClock
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private var computer: AIController?
-    @ObservationIgnored private var timeline: StepTimeline
     @ObservationIgnored private var heldA: Set<Direction> = []
     @ObservationIgnored private var heldB: Set<Direction> = []
     @ObservationIgnored private var pendingSwings: [Swing] = []
-    @ObservationIgnored private var pendingCommand: GameCommand?
-    @ObservationIgnored private var phoneTarget: Double?
-    @ObservationIgnored private var phoneSwung = false
-    @ObservationIgnored private var unsimulatedTime = 0.0
     @ObservationIgnored private var pausedForNewGame = false
 
     init(link: HostLink, clock: any MonotonicClock, defaults: UserDefaults) {
         self.link = link
         self.clock = clock
         self.defaults = defaults
-        setup = MatchSetup.saved(in: defaults)
-        let game = GameState(seed: Self.freshSeed())
-        self.game = game
-        timeline = StepTimeline(step: 0, at: clock.now, stepsPerSecond: game.config.stepsPerSecond)
-        phase = .serving(.playerA, since: 0)
-        computer = Self.computer(for: setup)
+        let setup = MatchSetup.saved(in: defaults)
+        self.setup = setup
+        let session = Self.session(for: setup, link: link, clock: clock)
+        self.session = session
+        phase = session.game.phase
         publish()
+    }
+
+    var game: GameState {
+        session.game
     }
 
     var isPaused: Bool {
-        phase == .paused
-    }
-
-    var isGameOver: Bool {
-        if case .gameOver = phase { return true }
+        if case .interrupted = stage { return true }
         return false
     }
 
+    var isWaitingForADevice: Bool {
+        switch stage {
+        case .interrupted(.phoneLost), .interrupted(.viewerLost): true
+        default: false
+        }
+    }
+
+    var isGameOver: Bool {
+        stage == .over
+    }
+
+    var hasStarted: Bool {
+        switch stage {
+        case .lobby, .countdown: false
+        case .playing, .interrupted, .over: true
+        }
+    }
+
     var showsControls: Bool {
-        isPaused || (controlsRequested && !isGameOver)
+        isPaused || (controlsRequested && stage == .playing)
     }
 
     func name(of side: Side) -> String {
-        side == .playerB && setup.opponent == .computer ? "Computer" : side.playerName
+        controller(of: side) == .computer ? "Computer" : side.playerName
     }
 
-    func playsOnKeyboard(_ side: Side) -> Bool {
-        side == .playerA ? !isPhonePlaying : setup.opponent == .keyboard
+    func controller(of side: Side) -> HostSession.Controller {
+        side == .playerA ? controllerA : controllerB
     }
 
-    func advance(by elapsed: TimeInterval) -> [GameEvent] {
-        let now = clock.now
-        takePhoneInput(keepingSwings: elapsed <= Self.longestFrame)
-        unsimulatedTime += min(elapsed, Self.longestFrame)
-        let stepDuration = 1 / Double(game.config.stepsPerSecond)
-        var events: [GameEvent] = []
-        while unsimulatedTime >= stepDuration {
-            unsimulatedTime -= stepDuration
-            events += game.step(nextInput())
+    func advance() -> [GameEvent] {
+        var local = LocalInput()
+        for side in Side.allCases where session.controller(of: side) == .local {
+            local.targets[side] = keyboardTarget(for: side)
         }
-        timeline.mark(step: game.step, at: now)
+        local.swings = pendingSwings
+        pendingSwings.removeAll()
+        let wasWaiting = !hasStarted
+        let events = session.advance(local: local)
         if events.contains(where: { if case .served = $0 { true } else { false } }) {
             controlsRequested = false
         }
-        sendHaptics(for: events)
         publish()
+        if wasWaiting, stage == .playing, setup.opponent == .player {
+            camera = link.viewerName == nil ? .side : .playerAEnd
+        }
+        if session.usesSideCamera, camera != .side {
+            camera = .side
+        }
         return events
     }
 
     func handle(_ press: KeyPress) -> KeyPress.Result {
         guard press.modifiers.isDisjoint(with: [.command, .control, .option]), let key = key(for: press) else { return .ignored }
-        guard playsOnKeyboard(key.side) else { return .handled }
+        guard session.controller(of: key.side) == .local else { return .handled }
         let isDown = press.phase == .down
         switch key {
         case .move(let side, let direction):
@@ -183,20 +203,21 @@ final class Match {
     }
 
     func chooseNewGame() {
-        let willBePaused = pendingCommand.map { $0 == .pause } ?? isPaused
-        if !willBePaused, !isGameOver {
-            pendingCommand = .pause
+        if stage == .playing {
+            session.pause()
             pausedForNewGame = true
+            publish()
         }
         isChoosingNewGame = true
     }
 
     func cancelNewGame() {
         isChoosingNewGame = false
-        if pausedForNewGame {
-            pendingCommand = .resume
-            pausedForNewGame = false
+        if pausedForNewGame, stage == .interrupted(.byHost) {
+            session.resume()
+            publish()
         }
+        pausedForNewGame = false
     }
 
     func start(_ newSetup: MatchSetup) {
@@ -208,17 +229,44 @@ final class Match {
     }
 
     func playAgain() {
-        game = GameState(seed: Self.freshSeed())
-        computer = Self.computer(for: setup)
-        timeline = StepTimeline(step: 0, at: clock.now, stepsPerSecond: game.config.stepsPerSecond)
+        session = Self.session(for: setup, link: link, clock: clock)
         pendingSwings.removeAll()
-        pendingCommand = nil
+        releaseAllKeys()
         controlsRequested = true
+        camera = .playerAEnd
         publish()
     }
 
     func togglePause() {
-        pendingCommand = isPaused ? .resume : .pause
+        guard !isWaitingForADevice else { return }
+        if isPaused {
+            session.resume()
+        } else {
+            session.pause()
+        }
+        publish()
+    }
+
+    func playOnWithoutTheMissingDevice() {
+        session.resume()
+        publish()
+    }
+
+    func startNow() {
+        session.startNow()
+    }
+
+    func swapSides() {
+        session.swapSides()
+        publish()
+    }
+
+    func letWaitingPhonePlay(_ side: Side, peer: PeerID) {
+        session.fillVacancy(side, with: peer)
+    }
+
+    func readiness(of side: Side) -> Readiness {
+        session.readiness(of: side)
     }
 
     func showControls() {
@@ -230,57 +278,8 @@ final class Match {
         heldB.removeAll()
     }
 
-    private func takePhoneInput(keepingSwings: Bool) {
-        let phone = link.takeInput()[.playerA]
-        guard let phone, let position = phone.position else {
-            if isPhonePlaying {
-                stopPhonePlay()
-            }
-            return
-        }
-        if !isPhonePlaying {
-            isPhonePlaying = true
-            releaseAllKeys()
-        }
-        phoneTarget = position
-        phoneSwung = keepingSwings && !phone.swings.isEmpty
-        guard keepingSwings else { return }
-        for swing in phone.swings {
-            let step = swing.macPeakTime.map(timeline.step(at:)) ?? game.step
-            pendingSwings.append(Swing(side: .playerA, step: step, strength: swing.strength, aim: 0))
-        }
-    }
-
-    private func stopPhonePlay() {
-        isPhonePlaying = false
-        phoneTarget = nil
-        phoneSwung = false
-        pausedForNewGame = false
-        if !isGameOver {
-            pendingCommand = .pause
-        }
-    }
-
-    private func sendHaptics(for events: [GameEvent]) {
-        guard isPhonePlaying else { return }
-        let isOver = events.contains { if case .gameOver = $0 { true } else { false } }
-        for event in events {
-            switch event {
-            case .served(.playerA) where phoneSwung, .hit(.playerA, _, _):
-                link.send(.hit, to: .playerA)
-            case .whiff(.playerA):
-                link.send(.miss, to: .playerA)
-            case .pointScored(.playerA, _) where !isOver:
-                link.send(.point, to: .playerA)
-            case .gameOver(.playerA):
-                link.send(.win, to: .playerA)
-            default:
-                break
-            }
-        }
-    }
-
     private func publish() {
+        let game = session.game
         if score != game.score {
             score = game.score
         }
@@ -289,6 +288,20 @@ final class Match {
         }
         if rally != game.rally {
             rally = game.rally
+        }
+        if stage != session.stage {
+            stage = session.stage
+        }
+        let currentA = session.controller(of: .playerA)
+        let currentB = session.controller(of: .playerB)
+        if controllerA != currentA || controllerB != currentB {
+            controllerA = currentA
+            controllerB = currentB
+            releaseAllKeys()
+        }
+        let currentDimmed = Set(Side.allCases.filter(session.isPointerStale))
+        if dimmed != currentDimmed {
+            dimmed = currentDimmed
         }
     }
 
@@ -316,28 +329,17 @@ final class Match {
     }
 
     private func swing(_ side: Side) {
-        let held = side == .playerA ? heldA : heldB
-        pendingSwings.append(Swing(side: side, step: game.step, strength: Self.keyboardStrength, aim: steering(held) * Self.keyboardAim))
+        pendingSwings.append(Swing(side: side, step: session.game.step, strength: Self.keyboardStrength, aim: steering(held(side)) * Self.keyboardAim))
     }
 
-    private func nextInput() -> StepInput {
-        defer {
-            pendingSwings.removeAll()
-            pendingCommand = nil
-        }
-        let move = pendingCommand == .pause ? nil : computer?.move(in: game)
-        return StepInput(
-            targetA: isPhonePlaying ? phoneTarget : keyboardTarget(for: .playerA, held: heldA),
-            targetB: computer == nil ? keyboardTarget(for: .playerB, held: heldB) : move?.target,
-            swings: pendingSwings + (move?.swing.map { [$0] } ?? []),
-            command: pendingCommand
-        )
+    private func held(_ side: Side) -> Set<Direction> {
+        side == .playerA ? heldA : heldB
     }
 
-    private func keyboardTarget(for side: Side, held: Set<Direction>) -> Double {
-        switch steering(held) {
+    private func keyboardTarget(for side: Side) -> Double {
+        switch steering(held(side)) {
         case ..<0: 0
-        case 0: game.paddlePosition(of: side)
+        case 0: session.game.paddlePosition(of: side)
         default: 1
         }
     }
@@ -346,9 +348,8 @@ final class Match {
         (held.contains(.right) ? 1 : 0) - (held.contains(.left) ? 1 : 0)
     }
 
-    private static func computer(for setup: MatchSetup) -> AIController? {
-        guard setup.opponent == .computer else { return nil }
-        return AIController(side: .playerB, profile: setup.difficulty.profile, seed: freshSeed())
+    private static func session(for setup: MatchSetup, link: HostLink, clock: any MonotonicClock) -> HostSession {
+        HostSession(link: link, clock: clock, mode: setup.mode, seed: freshSeed(), aiSeed: freshSeed())
     }
 
     private static func freshSeed() -> UInt64 {

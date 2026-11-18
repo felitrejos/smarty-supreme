@@ -3,8 +3,61 @@ import FlickCore
 import ImageIO
 import RealityKit
 
+struct TablePose {
+    let ball: SIMD2<Double>
+    let velocityY: Double
+    let shotStartY: Double
+    let paddleA: Double
+    let paddleB: Double
+    let isRally: Bool
+    let swung: Set<Side>
+    let dimmed: Set<Side>
+
+    init(game: GameState, events: [GameEvent], dimmed: Set<Side>) {
+        ball = game.ball.position
+        velocityY = game.ball.velocity.y
+        shotStartY = game.shotStart.y
+        paddleA = game.paddleX(of: .playerA)
+        paddleB = game.paddleX(of: .playerB)
+        if case .rally = game.phase {
+            isRally = true
+        } else {
+            isRally = false
+        }
+        swung = Set(events.compactMap { event in
+            switch event {
+            case .hit(let side, _, _), .whiff(let side), .served(let side): side
+            default: nil
+            }
+        })
+        self.dimmed = dimmed
+    }
+
+    init(frame: ViewerDisplay.Frame, previous: ViewerDisplay.Frame?) {
+        ball = frame.ball
+        velocityY = frame.velocity.y
+        shotStartY = frame.shotStart.y
+        paddleA = frame.paddleA
+        paddleB = frame.paddleB
+        isRally = frame.phase == .rally
+        let hitter: Side = frame.velocity.y > 0 ? .playerA : .playerB
+        if let previous, frame.rally > previous.rally || (previous.phase == .serving && frame.phase == .rally) {
+            swung = [hitter]
+        } else {
+            swung = []
+        }
+        dimmed = []
+    }
+
+    func paddleX(of side: Side) -> Double {
+        side == .playerA ? paddleA : paddleB
+    }
+}
+
 @MainActor
 final class TableScene {
+    private static let dimmedOpacity: Float = 0.35
+
     private typealias Size = Equipment.Size
 
     private enum Arc {
@@ -64,23 +117,18 @@ final class TableScene {
         }
     }
 
-    func update(from game: GameState, events: [GameEvent], elapsed: TimeInterval) {
-        for event in events {
-            switch event {
-            case .hit(let side, _, _), .whiff(let side), .served(let side):
-                swingElapsed[side] = 0
-            default:
-                break
-            }
+    func update(to pose: TablePose, elapsed: TimeInterval) {
+        for side in pose.swung {
+            swingElapsed[side] = 0
         }
         for paddle in paddles {
             let side = paddle.side
             let behind = side == .playerA ? Self.paddleBehindFace : -Self.paddleBehindFace
-            paddle.root.position = [sceneX(game.paddleX(of: side)), Size.tableHeight + Arc.paddleHeight, sceneZ(config.paddleFaceY(of: side)) + behind]
+            paddle.root.position = [sceneX(pose.paddleX(of: side)), Size.tableHeight + Arc.paddleHeight, sceneZ(config.paddleFaceY(of: side)) + behind]
             paddle.pivot.orientation = simd_quatf(angle: -Self.swingTilt * swingProgress(side, elapsed: elapsed), axis: [1, 0, 0])
+            paddle.root.components.set(OpacityComponent(opacity: pose.dimmed.contains(side) ? Self.dimmedOpacity : 1))
         }
-        let position = game.ball.position
-        ball.position = [sceneX(position.x), Size.tableHeight + ballHeight(in: game), sceneZ(position.y)]
+        ball.position = [sceneX(pose.ball.x), Size.tableHeight + ballHeight(for: pose), sceneZ(pose.ball.y)]
     }
 
     private func swingProgress(_ side: Side, elapsed: TimeInterval) -> Float {
@@ -94,12 +142,12 @@ final class TableScene {
         return Float(sin(.pi * advanced / Self.swingDuration))
     }
 
-    private func ballHeight(in game: GameState) -> Float {
-        guard case .rally = game.phase else { return Arc.paddleHeight }
-        let receiver = game.ball.velocity.y > 0 ? Side.playerB : Side.playerA
-        let start = game.shotStart.y
+    private func ballHeight(for pose: TablePose) -> Float {
+        guard pose.isRally else { return Arc.paddleHeight }
+        let receiver = pose.velocityY > 0 ? Side.playerB : Side.playerA
+        let start = pose.shotStartY
         let end = config.paddleFaceY(of: receiver)
-        let progress = Float(min(max((game.ball.position.y - start) / (end - start), 0), 1.3))
+        let progress = Float(min(max((pose.ball.y - start) / (end - start), 0), 1.3))
         if progress < Arc.bounceAt {
             let u = progress / Arc.bounceAt
             return Arc.paddleHeight * (1 - u) + Size.ballRadius * u + Arc.firstApex * 4 * u * (1 - u)

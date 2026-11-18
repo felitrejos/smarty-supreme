@@ -5,8 +5,12 @@ public struct BallPath: Sendable {
     private let highestX: Double
 
     public init(ball: GameState.Ball, config: GameConfig) {
-        start = ball.position
-        velocity = ball.velocity
+        self.init(position: ball.position, velocity: ball.velocity, config: config)
+    }
+
+    public init(position: SIMD2<Double>, velocity: SIMD2<Double>, config: GameConfig) {
+        start = position
+        self.velocity = velocity
         lowestX = config.ballRadius
         highestX = config.tableWidth - config.ballRadius
     }

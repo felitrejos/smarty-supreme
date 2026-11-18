@@ -1,9 +1,16 @@
 import FlickCore
 import Foundation
+import Observation
 import SystemConfiguration
 
 @MainActor
+@Observable
 final class HostController {
+    enum Role {
+        case host
+        case viewer(ViewerMatch)
+    }
+
     private static let tickInterval: TimeInterval = 0.1
     private static let longestName = 40
 
@@ -11,9 +18,10 @@ final class HostController {
     let match: Match
     let name: String
     let networkFailure = NetworkFailure()
+    private(set) var role = Role.host
 
-    private let transport: MultipeerTransport
-    private var tickTimer: Timer?
+    @ObservationIgnored private let transport: MultipeerTransport
+    @ObservationIgnored private var tickTimer: Timer?
 
     init() {
         let relay = EventRelay()
@@ -25,11 +33,34 @@ final class HostController {
         relay.connect(link.handle)
     }
 
+    var isViewer: Bool {
+        if case .viewer = role { return true }
+        return false
+    }
+
     func start() {
-        guard tickTimer == nil else { return }
+        guard tickTimer == nil, !isViewer else { return }
         transport.start()
         tickTimer = Timer.scheduledTimer(withTimeInterval: Self.tickInterval, repeats: true) { [link] _ in
             link.tick()
+        }
+    }
+
+    func setViewer(_ viewing: Bool) {
+        guard viewing != isViewer else { return }
+        if viewing {
+            tickTimer?.invalidate()
+            tickTimer = nil
+            transport.stop()
+            let viewer = ViewerMatch(name: name)
+            role = .viewer(viewer)
+            viewer.start()
+        } else {
+            if case .viewer(let viewer) = role {
+                viewer.stop()
+            }
+            role = .host
+            start()
         }
     }
 }
