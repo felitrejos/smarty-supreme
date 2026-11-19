@@ -61,7 +61,6 @@ public struct SessionConfig: Sendable {
     public var roundTripWarning: Microseconds = 40_000
     public var roundTripLimit: Microseconds = 100_000
     public var longestFrame: Microseconds = 100_000
-    public var latencyHistory = 600
 
     public init() {}
 }

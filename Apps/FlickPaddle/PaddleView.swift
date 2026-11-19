@@ -8,12 +8,11 @@ struct PaddleView: View {
     @State private var thermalState = ProcessInfo.processInfo.thermalState
 
     var body: some View {
-        NavigationStack {
-            TimelineView(.animation(minimumInterval: isHot ? Self.hotFrameInterval : nil)) { _ in
-                content(controller.sensing.snapshot)
-            }
-            .navigationTitle("Flick Paddle")
+        TimelineView(.animation(minimumInterval: isHot ? Self.hotFrameInterval : nil)) { _ in
+            content(controller.sensing.snapshot)
         }
+        .background(Paddle.Tone.backdrop)
+        .preferredColorScheme(.dark)
         .defersSystemGestures(on: .bottom)
         .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification).receive(on: RunLoop.main)) { _ in
             thermalState = ProcessInfo.processInfo.thermalState
@@ -26,65 +25,84 @@ struct PaddleView: View {
         thermalState == .serious || thermalState == .critical
     }
 
+    private var side: Side {
+        controller.link.gameState?.side ?? .playerA
+    }
+
     private func content(_ snapshot: PaddleSensing.Snapshot) -> some View {
-        VStack(spacing: 24) {
-            LinkHeader(link: controller.link, launchedAt: controller.launchedAt, networkFailure: controller.networkFailure.latest)
-            if isHot {
-                Label("Your iPhone is hot. Play continues at full speed; the screen updates less often.", systemImage: "thermometer.high")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if let state = controller.link.gameState {
-                MatchPanel(state: state, controller: controller)
-            }
-            playArea(snapshot)
-            if isMotionAvailable {
-                Picker("Sensitivity", selection: Binding(get: { snapshot.sensitivity }, set: controller.setSensitivity)) {
-                    ForEach(Sensitivity.allCases, id: \.self) { sensitivity in
-                        Text("\(Int(sensitivity.rangeDegrees))°").tag(sensitivity)
+        VStack(spacing: 0) {
+            PaddleFace(side: side, tilt: tilt(snapshot), swings: snapshot.swings) {
+                VStack(spacing: 14) {
+                    Stamp()
+                    LinkHeader(link: controller.link, launchedAt: controller.launchedAt, networkFailure: controller.networkFailure.latest)
+                    if isHot {
+                        Text("Your iPhone is hot. The screen updates less often; play is unaffected.")
+                            .font(Paddle.Typeface.note)
+                            .foregroundStyle(Paddle.Tone.warning)
+                            .multilineTextAlignment(.center)
+                    }
+                    if let state = controller.link.gameState {
+                        MatchPanel(state: state, controller: controller)
+                    }
+                    Spacer(minLength: 0)
+                    playArea(snapshot)
+                    if isMotionAvailable {
+                        SensitivityPicker(selected: snapshot.sensitivity, select: controller.setSensitivity)
                     }
                 }
-                .pickerStyle(.segmented)
-                Button(action: controller.sensing.calibrate) {
-                    Text(snapshot.calibration == .inProgress ? "Hold still…" : "Calibrate")
-                        .frame(maxWidth: .infinity)
+                .padding(.horizontal, 30)
+                .padding(.top, 34)
+                .padding(.bottom, 28)
+            }
+            Handle {
+                if isMotionAvailable {
+                    Button(action: controller.sensing.calibrate) {
+                        Text(snapshot.calibration == .inProgress ? "HOLD STILL" : "CALIBRATE")
+                            .font(Paddle.Typeface.handle)
+                            .tracking(2)
+                            .foregroundStyle(Paddle.Tone.ink)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .disabled(snapshot.calibration == .inProgress)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(snapshot.calibration == .inProgress)
             }
         }
-        .padding()
-        .safeAreaInset(edge: .bottom) {
-            StatsFooter(stats: controller.stats)
-        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+    }
+
+    private func tilt(_ snapshot: PaddleSensing.Snapshot) -> Double {
+        guard case .position(let position) = snapshot.reading else { return 0 }
+        return (position - 0.5) * Paddle.maximumTilt * 2
     }
 
     @ViewBuilder
     private func playArea(_ snapshot: PaddleSensing.Snapshot) -> some View {
-        let area = VStack(spacing: 24) {
+        let area = VStack(spacing: 14) {
+            Text(isMotionAvailable ? status(snapshot) : "Drag along the groove to move, swipe up to swing.")
+                .font(Paddle.Typeface.body)
+                .foregroundStyle(Paddle.Tone.cream)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, minHeight: 44)
             if isMotionAvailable {
-                Text(status(snapshot))
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                PaddleTrack(reading: snapshot.reading)
-                SwingPanel(snapshot: snapshot)
+                Groove(reading: snapshot.reading)
             } else {
-                Text("No motion sensors here. Drag along the bar to move, and swipe up here to swing.")
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, minHeight: 48)
                 GeometryReader { geometry in
-                    PaddleTrack(reading: snapshot.reading)
+                    Groove(reading: snapshot.reading)
                         .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
                             controller.dragPaddle(to: drag.location.x, across: geometry.size.width)
                         })
                 }
-                .frame(height: 44)
+                .frame(height: Paddle.grooveHeight)
             }
-            Spacer()
+            if let swing = snapshot.lastSwing {
+                Text("\(snapshot.swings) \(snapshot.swings == 1 ? "SWING" : "SWINGS") · LAST \(Int(swing.strength * 100))%")
+                    .font(Paddle.Typeface.small)
+                    .tracking(1.5)
+                    .foregroundStyle(Paddle.Tone.cream.opacity(0.7))
+            }
         }
         .contentShape(Rectangle())
         .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { drag in
@@ -121,70 +139,208 @@ struct PaddleView: View {
     }
 }
 
+enum Paddle {
+    static let maximumTilt = 7.0
+    static let grooveHeight: CGFloat = 26
+    static let rim: CGFloat = 9
+
+    enum Tone {
+        static let backdrop = Color(red: 0.05, green: 0.04, blue: 0.035)
+        static let cream = Color(red: 0.95, green: 0.91, blue: 0.82)
+        static let gold = Color(red: 0.86, green: 0.71, blue: 0.42)
+        static let ink = Color(red: 0.13, green: 0.08, blue: 0.05)
+        static let warning = Color(red: 1, green: 0.72, blue: 0.4)
+        static let woodLight = Color(red: 0.78, green: 0.58, blue: 0.38)
+        static let woodDark = Color(red: 0.48, green: 0.31, blue: 0.18)
+    }
+
+    enum Typeface {
+        static let stamp = Font.custom("Futura-CondensedExtraBold", size: 30)
+        static let score = Font.custom("Futura-CondensedExtraBold", size: 64)
+        static let title = Font.custom("Futura-Bold", size: 17)
+        static let body = Font.custom("Futura-Medium", size: 16)
+        static let note = Font.custom("Futura-Medium", size: 13)
+        static let small = Font.custom("Futura-Bold", size: 11)
+        static let handle = Font.custom("Futura-Bold", size: 14)
+    }
+
+    static func rubber(_ side: Side) -> Color {
+        side.rubberColor
+    }
+}
+
+private struct PaddleFace<Content: View>: View {
+    let side: Side
+    let tilt: Double
+    let swings: Int
+    @ViewBuilder let content: Content
+
+    @State private var flash = 0.0
+    @State private var pulse = 1.0
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 150, style: .continuous)
+        ZStack {
+            shape.fill(LinearGradient(colors: [Paddle.Tone.woodLight, Paddle.Tone.woodDark], startPoint: .topLeading, endPoint: .bottomTrailing))
+            Pips(color: Paddle.rubber(side))
+                .clipShape(shape.inset(by: Paddle.rim))
+                .overlay(shape.inset(by: Paddle.rim).strokeBorder(.black.opacity(0.45), lineWidth: 1.5))
+            shape.inset(by: Paddle.rim)
+                .fill(RadialGradient(colors: [.white.opacity(0.14), .clear], center: .init(x: 0.35, y: 0.2), startRadius: 0, endRadius: 420))
+            shape.inset(by: Paddle.rim).fill(.white.opacity(flash))
+            content
+        }
+        .scaleEffect(pulse)
+        .rotation3DEffect(.degrees(tilt), axis: (x: 0, y: 0, z: 1), anchor: .bottom)
+        .shadow(color: .black.opacity(0.6), radius: 18, y: 10)
+        .onChange(of: swings) {
+            flash = 0.28
+            pulse = 1.035
+            withAnimation(.easeOut(duration: 0.35)) {
+                flash = 0
+                pulse = 1
+            }
+        }
+    }
+}
+
+private struct Pips: View {
+    let color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color))
+            let spacing: CGFloat = 9
+            let radius: CGFloat = 2.6
+            var row = 0
+            var y: CGFloat = 0
+            while y < size.height + spacing {
+                var x: CGFloat = row.isMultiple(of: 2) ? 0 : spacing / 2
+                while x < size.width + spacing {
+                    let pip = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
+                    context.fill(Path(ellipseIn: pip.offsetBy(dx: 0.6, dy: 0.8)), with: .color(.black.opacity(0.35)))
+                    context.fill(Path(ellipseIn: pip), with: .color(color))
+                    context.fill(Path(ellipseIn: pip.insetBy(dx: 1.1, dy: 1.1).offsetBy(dx: -0.5, dy: -0.6)), with: .color(.white.opacity(0.12)))
+                    x += spacing
+                }
+                y += spacing * 0.866
+                row += 1
+            }
+        }
+        .drawingGroup()
+        .accessibilityHidden(true)
+    }
+}
+
+private struct Handle<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ZStack {
+            UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 30, bottomTrailingRadius: 30, topTrailingRadius: 6, style: .continuous)
+                .fill(LinearGradient(colors: [Paddle.Tone.woodDark, Paddle.Tone.woodLight, Paddle.Tone.woodDark], startPoint: .leading, endPoint: .trailing))
+            content
+        }
+        .frame(width: 150, height: 74)
+    }
+}
+
+private struct Stamp: View {
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("FLICK PONG")
+                .font(Paddle.Typeface.stamp)
+                .tracking(3)
+            Text("HARDBAT · TOURNAMENT")
+                .font(Paddle.Typeface.small)
+                .tracking(3)
+        }
+        .foregroundStyle(Paddle.Tone.gold)
+        .shadow(color: .black.opacity(0.4), radius: 0, x: 0, y: 1)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Flick Pong")
+    }
+}
+
+private struct SensitivityPicker: View {
+    let selected: Sensitivity
+    let select: (Sensitivity) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Sensitivity.allCases, id: \.self) { sensitivity in
+                Button { select(sensitivity) } label: {
+                    Text("\(Int(sensitivity.rangeDegrees))°")
+                        .font(Paddle.Typeface.small)
+                        .tracking(1)
+                        .foregroundStyle(sensitivity == selected ? Paddle.Tone.ink : Paddle.Tone.cream)
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                        .background(sensitivity == selected ? Paddle.Tone.cream : Paddle.Tone.cream.opacity(0.12), in: Capsule())
+                }
+                .accessibilityLabel("Tilt range \(Int(sensitivity.rangeDegrees)) degrees")
+                .accessibilityAddTraits(sensitivity == selected ? .isSelected : [])
+            }
+        }
+    }
+}
+
 private struct MatchPanel: View {
     let state: GameStateUpdate
     let controller: PaddleController
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             if state.connectionIsSlow {
-                Label("Slow connection. Turn on Wi‑Fi on both devices and keep them near the router.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Slow connection. Turn on Wi‑Fi on both devices and keep them near the router.")
+                    .font(Paddle.Typeface.note)
+                    .foregroundStyle(Paddle.Tone.warning)
+                    .multilineTextAlignment(.center)
             }
-            HStack(spacing: 8) {
-                Capsule()
-                    .fill(state.side.rubberColor)
-                    .frame(width: 18, height: 4)
-                Text("You’re \(state.side.playerName)")
-                    .font(.headline)
-                Spacer()
-                if showsScore {
-                    Text("\(score(of: state.side)) – \(score(of: state.side.opponent))")
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                        .accessibilityLabel("You \(score(of: state.side)), opponent \(score(of: state.side.opponent))")
+            Text("YOU’RE \(state.side.playerName.uppercased())")
+                .font(Paddle.Typeface.small)
+                .tracking(2)
+                .foregroundStyle(Paddle.Tone.cream.opacity(0.8))
+            if showsScore {
+                HStack(spacing: 18) {
+                    Text("\(score(of: state.side))")
+                    Text("–").foregroundStyle(Paddle.Tone.cream.opacity(0.5))
+                    Text("\(score(of: state.side.opponent))")
                 }
+                .font(Paddle.Typeface.score)
+                .monospacedDigit()
+                .foregroundStyle(Paddle.Tone.cream)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("You \(score(of: state.side)), opponent \(score(of: state.side.opponent))")
             }
             action
         }
-        .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
     private var action: some View {
         switch state.phase {
         case .calibrating:
-            Text("Calibrate below, then tap Ready.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            note("Calibrate below, then tap Ready.")
         case .lobby:
-            wideButton("Ready", prominent: true) { controller.link.setReady(true) }
+            StampedButton(title: "READY", prominent: true) { controller.link.setReady(true) }
         case .ready:
             VStack(spacing: 8) {
-                Label("Ready. The match starts when both players are.", systemImage: "checkmark.circle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.green)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                wideButton("Not Ready", prominent: false) { controller.link.setReady(false) }
+                note("Ready. The match starts when both players are.")
+                StampedButton(title: "NOT READY", prominent: false) { controller.link.setReady(false) }
             }
         case .serving, .rally, .pointScored:
-            wideButton("Pause", prominent: false) { controller.link.requestPause(true) }
+            StampedButton(title: "PAUSE", prominent: false) { controller.link.requestPause(true) }
         case .paused:
             if state.canResume {
-                wideButton("Continue", prominent: true) { controller.link.requestPause(false) }
+                StampedButton(title: "CONTINUE", prominent: true) { controller.link.requestPause(false) }
             } else {
-                Text("Paused. Waiting for the other player or the Mac.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                note("Paused. Waiting for the other player or the Mac.")
             }
         case .gameOver:
-            Text(state.winner == state.side ? "You won" : "You lost")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(state.winner == state.side ? "YOU WON" : "YOU LOST")
+                .font(Paddle.Typeface.title)
+                .tracking(2)
+                .foregroundStyle(Paddle.Tone.gold)
         }
     }
 
@@ -199,35 +355,30 @@ private struct MatchPanel: View {
         Int(side == .playerA ? state.scoreA : state.scoreB)
     }
 
-    @ViewBuilder
-    private func wideButton(_ title: String, prominent: Bool, action: @escaping () -> Void) -> some View {
-        if prominent {
-            Button(action: action) { Text(title).frame(maxWidth: .infinity) }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-        } else {
-            Button(action: action) { Text(title).frame(maxWidth: .infinity) }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-        }
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(Paddle.Typeface.note)
+            .foregroundStyle(Paddle.Tone.cream.opacity(0.8))
+            .multilineTextAlignment(.center)
     }
 }
 
-private struct StatsFooter: View {
-    let stats: DeviceStats
+private struct StampedButton: View {
+    let title: String
+    let prominent: Bool
+    let action: () -> Void
 
     var body: some View {
-        if let cpu = stats.cpuShare {
-            Text(text(cpu: cpu))
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(stats.isWithinBudget(cpu: cpu) ? Color.secondary : Color.orange)
+        Button(action: action) {
+            Text(title)
+                .font(Paddle.Typeface.title)
+                .tracking(2)
+                .foregroundStyle(prominent ? Paddle.Tone.ink : Paddle.Tone.cream)
+                .frame(maxWidth: 220, minHeight: 48)
+                .background(prominent ? Paddle.Tone.cream : .clear, in: Capsule())
+                .overlay(Capsule().strokeBorder(Paddle.Tone.cream, lineWidth: prominent ? 0 : 1.5))
         }
-    }
-
-    private func text(cpu: Double) -> String {
-        let cpuText = String(format: "CPU %.0f%% of a core", cpu * 100)
-        guard let drop = stats.batteryDrop else { return cpuText }
-        return cpuText + String(format: " · battery −%.0f%% in %.0f min unplugged", drop * 100, stats.batteryMinutes)
+        .buttonStyle(.plain)
     }
 }
 
@@ -238,18 +389,18 @@ private struct LinkHeader: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Label(title, systemImage: symbol)
-                .font(.subheadline.weight(.semibold))
+            Text(title.uppercased())
+                .font(Paddle.Typeface.small)
+                .tracking(2)
+                .foregroundStyle(Paddle.Tone.cream)
             if let detail {
                 Text(detail)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(Paddle.Typeface.note)
+                    .foregroundStyle(Paddle.Tone.cream.opacity(0.7))
                     .multilineTextAlignment(.center)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .combine)
     }
 
     private var title: String {
@@ -263,22 +414,13 @@ private struct LinkHeader: View {
         }
     }
 
-    private var symbol: String {
-        switch link.status {
-        case .paired: "checkmark.circle.fill"
-        case .refused: "exclamationmark.triangle.fill"
-        case .searching, .handshaking: "antenna.radiowaves.left.and.right"
-        }
-    }
-
     private var detail: String? {
         if let networkFailure {
             return "Allow Local Network access for Flick Paddle in Settings › Privacy & Security › Local Network. (\(networkFailure))"
         }
         switch link.status {
         case .paired:
-            guard let pairedAt = link.pairedAt else { return nil }
-            return String(format: "Paired %.1f s after opening", Double(pairedAt - launchedAt) / 1_000_000)
+            return nil
         case .refused(.versionMismatch):
             return "This Mac runs a different version of Flick Pong. Update both apps."
         case .refused(.gameFull):
@@ -293,45 +435,27 @@ private struct LinkHeader: View {
     }
 }
 
-private struct PaddleTrack: View {
+private struct Groove: View {
     let reading: PointerReading?
 
     var body: some View {
         GeometryReader { geometry in
-            let paddleWidth = geometry.size.width * 0.18
+            let puck = geometry.size.width * 0.2
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color(.secondarySystemBackground))
+                    .fill(.black.opacity(0.35))
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.08), lineWidth: 1))
                 if case .position(let position) = reading {
                     Capsule()
-                        .fill(Color.accentColor)
-                        .frame(width: paddleWidth)
-                        .offset(x: position * (geometry.size.width - paddleWidth))
+                        .fill(Paddle.Tone.cream)
+                        .frame(width: puck)
+                        .padding(4)
+                        .offset(x: position * (geometry.size.width - puck - 8))
                 }
             }
         }
-        .frame(height: 28)
+        .frame(height: Paddle.grooveHeight)
         .opacity(reading == .notUpright ? 0.4 : 1)
         .accessibilityLabel("Paddle position")
-    }
-}
-
-private struct SwingPanel: View {
-    let snapshot: PaddleSensing.Snapshot
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Text("\(snapshot.swings)")
-                .font(.system(size: 64, weight: .semibold, design: .rounded).monospacedDigit())
-            Text(snapshot.swings == 1 ? "swing" : "swings")
-                .foregroundStyle(.secondary)
-            if let swing = snapshot.lastSwing {
-                ProgressView(value: swing.strength)
-                    .frame(maxWidth: 200)
-                Text(String(format: "Last: %.1f g, %.1f rad/s, strength %d%%", swing.peakAcceleration, swing.peakRotationRate, Int(swing.strength * 100)))
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
     }
 }

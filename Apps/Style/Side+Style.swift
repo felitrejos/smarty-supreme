@@ -3,6 +3,6 @@ import SwiftUI
 
 extension Side {
     var rubberColor: Color {
-        self == .playerA ? Color(red: 0.12, green: 0.36, blue: 0.86) : Color(red: 0.84, green: 0.16, blue: 0.16)
+        self == .playerA ? Color(red: 0.72, green: 0.1, blue: 0.08) : Color(red: 0.08, green: 0.08, blue: 0.08)
     }
 }

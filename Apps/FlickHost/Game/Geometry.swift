@@ -38,70 +38,11 @@ struct MeshBuilder {
 
 @MainActor
 enum Geometry {
-    private struct CurveFrame {
-        let point: SIMD2<Float>
-        let tangent: SIMD2<Float>
-
-        var normal: SIMD2<Float> {
-            SIMD2(-tangent.y, tangent.x)
-        }
-
-        func position(x: Float, offset: Float) -> SIMD3<Float> {
-            let shifted = point + normal * offset
-            return [x, shifted.y, shifted.x]
-        }
-
-        func normal3(sign: Float) -> SIMD3<Float> {
-            let facing = normal * sign
-            return [0, facing.y, facing.x]
-        }
-    }
-
     private static let handleSquareness: Float = 0.7
     private static let handleSections = 28
     private static let handleSegments = 40
     private static let bladeOutlinePoints = 120
     private static let bladeSquareness: Float = 2.35
-
-    static func sweptBlade(along curve: [SIMD2<Float>], width: Float, thickness: Float) throws -> MeshResource {
-        var builder = MeshBuilder()
-        let frames = curve.indices.map { index in
-            let previous = curve[max(index - 1, 0)]
-            let next = curve[min(index + 1, curve.count - 1)]
-            return CurveFrame(point: curve[index], tangent: simd_normalize(next - previous))
-        }
-        let halfWidth = width / 2
-        let halfThickness = thickness / 2
-        for index in frames.indices.dropLast() {
-            let frame = frames[index]
-            let nextFrame = frames[index + 1]
-            let startV = Float(index) / Float(frames.count - 1)
-            let endV = Float(index + 1) / Float(frames.count - 1)
-            for sign: Float in [1, -1] {
-                let offset = sign * halfThickness
-                let a = builder.vertex(frame.position(x: -halfWidth, offset: offset), normal: frame.normal3(sign: sign), uv: [0, startV])
-                let b = builder.vertex(frame.position(x: halfWidth, offset: offset), normal: frame.normal3(sign: sign), uv: [1, startV])
-                let c = builder.vertex(nextFrame.position(x: halfWidth, offset: offset), normal: nextFrame.normal3(sign: sign), uv: [1, endV])
-                let d = builder.vertex(nextFrame.position(x: -halfWidth, offset: offset), normal: nextFrame.normal3(sign: sign), uv: [0, endV])
-                builder.quad(a, b, c, d)
-            }
-            for side: Float in [-1, 1] {
-                let outward: SIMD3<Float> = [side, 0, 0]
-                let a = builder.vertex(frame.position(x: side * halfWidth, offset: halfThickness), normal: outward, uv: [0, startV])
-                let b = builder.vertex(frame.position(x: side * halfWidth, offset: -halfThickness), normal: outward, uv: [1, startV])
-                let c = builder.vertex(nextFrame.position(x: side * halfWidth, offset: -halfThickness), normal: outward, uv: [1, endV])
-                let d = builder.vertex(nextFrame.position(x: side * halfWidth, offset: halfThickness), normal: outward, uv: [0, endV])
-                builder.quad(a, b, c, d)
-            }
-        }
-        for (frame, sign) in [(frames[0], Float(-1)), (frames[frames.count - 1], Float(1))] {
-            let outward: SIMD3<Float> = [0, frame.tangent.y * sign, frame.tangent.x * sign]
-            let corners = [(-halfWidth, halfThickness), (halfWidth, halfThickness), (halfWidth, -halfThickness), (-halfWidth, -halfThickness)]
-                .map { builder.vertex(frame.position(x: $0.0, offset: $0.1), normal: outward, uv: [0, 0]) }
-            builder.quad(corners[0], corners[1], corners[2], corners[3])
-        }
-        return try builder.mesh(named: "blade")
-    }
 
     static func bevelledSlab(outline: [SIMD2<Float>], bottom: Float, top: Float, bevel: Float, size: SIMD2<Float>) throws -> MeshResource {
         var builder = MeshBuilder()

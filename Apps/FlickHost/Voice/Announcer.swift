@@ -1,63 +1,49 @@
 import AVFoundation
+import FlickCore
+import OSLog
 
 @MainActor
-final class Announcer: NSObject, AVSpeechSynthesizerDelegate {
-    enum Speaker {
+final class Announcer {
+    enum Speaker: String {
         case referee
-        case opponent
+        case computer
     }
 
-    private static let opponentPitch: Float = 1.15
-    private static let opponentRate: Float = 1.08
+    private static let reverbMix: Float = 30
+    private static let log = Logger(subsystem: "com.flickpong.host", category: "Announcer")
 
-    private let synthesizer = AVSpeechSynthesizer()
-    private let refereeVoice: AVSpeechSynthesisVoice?
-    private let opponentVoice: AVSpeechSynthesisVoice?
-    private var starts: [ObjectIdentifier: () -> Void] = [:]
+    private let engine = AVAudioEngine()
+    private let voice = AVAudioPlayerNode()
+    private let hall = AVAudioUnitReverb()
+    private(set) var isSpeaking = false
 
-    override init() {
-        let voices = Self.rankedVoices()
-        let referee = voices.first
-        refereeVoice = referee
-        opponentVoice = voices.first { $0.gender != referee?.gender } ?? voices.dropFirst().first ?? referee
-        super.init()
-        synthesizer.delegate = self
+    init() {
+        hall.loadFactoryPreset(.largeHall)
+        hall.wetDryMix = Self.reverbMix
+        engine.attach(voice)
+        engine.attach(hall)
+        engine.connect(voice, to: hall, format: nil)
+        engine.connect(hall, to: engine.mainMixerNode, format: nil)
     }
 
-    var isSpeaking: Bool {
-        synthesizer.isSpeaking
-    }
-
-    func say(_ text: String, as speaker: Speaker, onStart: @escaping () -> Void = {}) {
-        let utterance = AVSpeechUtterance(string: text)
-        switch speaker {
-        case .referee:
-            utterance.voice = refereeVoice
-        case .opponent:
-            utterance.voice = opponentVoice
-            utterance.pitchMultiplier = Self.opponentPitch
-            utterance.rate = AVSpeechUtteranceDefaultSpeechRate * Self.opponentRate
+    func say(_ line: String, as speaker: Speaker) {
+        guard let url = Bundle.main.url(forResource: VoiceClip.name(for: line), withExtension: "m4a", subdirectory: "Voice/\(speaker.rawValue)") else {
+            Self.log.fault("No recording for \(line, privacy: .public)")
+            return
         }
-        starts[ObjectIdentifier(utterance)] = onStart
-        synthesizer.speak(utterance)
-    }
-
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
-        let id = ObjectIdentifier(utterance)
-        Task { @MainActor in
-            starts.removeValue(forKey: id)?()
+        do {
+            let file = try AVAudioFile(forReading: url)
+            if !engine.isRunning {
+                engine.connect(voice, to: hall, format: file.processingFormat)
+                try engine.start()
+            }
+            isSpeaking = true
+            voice.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+                Task { @MainActor in self?.isSpeaking = false }
+            }
+            voice.play()
+        } catch {
+            Self.log.error("Couldn’t play \(line, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
-    }
-
-    private static func rankedVoices() -> [AVSpeechSynthesisVoice] {
-        let language = AVSpeechSynthesisVoice.currentLanguageCode()
-        let prefix = String(language.prefix(2))
-        return AVSpeechSynthesisVoice.speechVoices()
-            .filter { $0.language.hasPrefix(prefix) && !$0.voiceTraits.contains(.isPersonalVoice) && !$0.voiceTraits.contains(.isNoveltyVoice) }
-            .sorted { rank($0, language) > rank($1, language) }
-    }
-
-    private static func rank(_ voice: AVSpeechSynthesisVoice, _ language: String) -> Int {
-        voice.quality.rawValue * 2 + (voice.language == language ? 1 : 0)
     }
 }

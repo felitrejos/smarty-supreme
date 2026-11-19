@@ -50,16 +50,7 @@ struct ViewerView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if showsFrameTimes {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(delayText)
-                        .foregroundStyle(.secondary)
-                    ResourceLine(stats: stats)
-                }
-                .font(.caption)
-                .monospacedDigit()
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .glassEffect(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                PerformanceLine(stats: stats)
                 .padding(16)
             }
         }
@@ -92,10 +83,5 @@ struct ViewerView: View {
         case .gameOver: return (viewer.winner.map { "\($0.playerName) wins" } ?? "Game over", nil)
         case .serving, .rally, .pointScored: return nil
         }
-    }
-
-    private var delayText: String {
-        guard let delay = viewer.delayPercentile95 else { return "Measuring delay behind the host…" }
-        return String(format: "95%% of frames within %.1f ms of the host", Double(delay) / 1_000)
     }
 }

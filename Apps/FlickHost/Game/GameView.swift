@@ -32,16 +32,15 @@ struct GameView: View {
                 stage.updates = content.subscribe(to: SceneEvents.Update.self) { event in
                     let events = match.advance()
                     scene.update(to: TablePose(game: match.game, events: events, dimmed: match.dimmed), elapsed: event.deltaTime)
-                    stats.record(event.deltaTime) {
-                        FrameStats.Latencies(
-                            swing: match.session.swingLatency.percentile(0.95),
-                            commentary: match.referee.commentaryLatency.percentile(0.95)
-                        )
-                    }
+                    stats.record(event.deltaTime)
                 }
             } catch {
                 stage.failure = "The table couldn’t be set up: \(error.localizedDescription)"
             }
+        }
+        .overlay {
+            FilmLook()
+                .ignoresSafeArea()
         }
         .accessibilityLabel("Table tennis table")
         .accessibilityValue(subtitle)
@@ -79,7 +78,7 @@ struct GameView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if showsFrameTimes {
-                FrameTimes(stats: stats)
+                PerformanceLine(stats: stats)
                     .padding(16)
             }
         }
@@ -359,52 +358,18 @@ private struct Keycap: View {
     }
 }
 
-private struct FrameTimes: View {
+struct PerformanceLine: View {
     let stats: FrameStats
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(frameText)
-                .foregroundStyle(meetsBudget ? Color.secondary : Color.orange)
-            ResourceLine(stats: stats)
-            if let latency = stats.latencies.swing {
-                Text(String(format: "Swings reach the game 95%% within %.0f ms, plus a frame to the screen", Double(latency) / 1_000))
-                    .foregroundStyle(.secondary)
-            }
-            if let latency = stats.latencies.commentary {
-                Text(String(format: "Commentary starts 95%% within %.1f s of the play", Double(latency) / 1_000_000))
-                    .foregroundStyle(latency <= FrameStats.commentaryBudget ? Color.secondary : Color.orange)
-            }
+        if let fps = stats.framesPerSecond, let cpu = stats.cpuShare {
+            Text(String(format: "%.0f fps · CPU %.0f%%", fps, cpu * 100))
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(.black.opacity(0.35), in: Capsule())
         }
-        .font(.caption)
-        .monospacedDigit()
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .glassEffect(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var meetsBudget: Bool {
-        guard let percentile = stats.percentile99 else { return true }
-        return percentile <= FrameStats.budget && stats.dropped == 0
-    }
-
-    private var frameText: String {
-        guard let percentile = stats.percentile99 else { return "Measuring frames…" }
-        return String(format: "99%% of frames under %.1f ms · %ld dropped · last %.0f s", percentile * 1_000, stats.dropped, stats.measured)
-    }
-}
-
-struct ResourceLine: View {
-    let stats: FrameStats
-
-    var body: some View {
-        if let cpu = stats.cpuShare {
-            Text(String(format: "CPU %.0f%% of a core · memory %.0f MB, %+.1f MB since the first frame", cpu * 100, Double(stats.memoryBytes) / 1_000_000, Double(stats.memoryGrowth) / 1_000_000))
-                .foregroundStyle(withinBudget(cpu) ? Color.secondary : Color.orange)
-        }
-    }
-
-    private func withinBudget(_ cpu: Double) -> Bool {
-        cpu <= FrameStats.cpuBudget && stats.memoryGrowth < FrameStats.memoryGrowthBudget
     }
 }

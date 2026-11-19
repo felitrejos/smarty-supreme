@@ -32,23 +32,26 @@ public struct Commentator: Sendable {
     }
 
     private let names: [Side: String]
+    private let config: GameConfig
     private let opponent: Side?
     private var random: SplitMix64
     private var lastSaid: [OpponentLine: Int] = [:]
     private var point = Point()
     private var queue: [CommentaryLine] = []
 
-    public init(names: [Side: String], opponent: Side? = nil, seed: UInt64 = 0) {
+    public init(names: [Side: String], config: GameConfig = GameConfig(), opponent: Side? = nil, seed: UInt64 = 0) {
         self.names = names
+        self.config = config
         self.opponent = opponent
         random = SplitMix64(seed: seed)
     }
 
-    public mutating func observe(_ events: [GameEvent], target: Int, at now: Microseconds) {
+    public mutating func observe(_ events: [GameEvent], at now: Microseconds) {
+        let target = config.winningScore
         let winner = events.lazy.compactMap { if case .gameOver(let winner) = $0 { winner } else { nil } }.first
         let isForfeit = winner != nil && !events.contains { if case .pointScored = $0 { true } else { false } }
         if let winner, isForfeit {
-            queue.append(CommentaryLine(text: "Game to \(name(winner)) by forfeit.", kind: .call, createdAt: now))
+            queue.append(CommentaryLine(text: Umpire.forfeit(name(winner)), kind: .call, createdAt: now))
         }
         for event in events {
             switch event {
@@ -63,7 +66,7 @@ public struct Commentator: Sendable {
                 point.edgeBy = nil
                 point.whiffBy = nil
                 if rally == Self.longRally {
-                    highlight("Rally of \(rally)!", at: now)
+                    highlight(Umpire.longRally, at: now)
                 }
             case .edgeHit(let side):
                 point.edgeBy = side
@@ -71,8 +74,7 @@ public struct Commentator: Sendable {
                 point.whiffBy = side
             case .pointScored(let pointWinner, let score):
                 if let winner {
-                    let (high, low) = (max(score.a, score.b), min(score.a, score.b))
-                    queue.append(CommentaryLine(text: "Game to \(name(winner)), \(high) to \(low)!", kind: .call, createdAt: now))
+                    queue.append(CommentaryLine(text: Umpire.game(name(winner), score: score, target: target), kind: .call, createdAt: now))
                 } else {
                     callPoint(won: pointWinner, score: score, target: target, at: now)
                 }
@@ -93,26 +95,13 @@ public struct Commentator: Sendable {
     }
 
     private mutating func callPoint(won winner: Side, score: Score, target: Int, at now: Microseconds) {
-        var parts: [String] = []
-        if let whiffBy = point.whiffBy, whiffBy != winner {
-            parts.append("\(name(whiffBy)) whiffs.")
-        } else if let edgeBy = point.edgeBy, edgeBy == winner {
-            parts.append("Off the edge from \(name(winner)).")
-        }
-        parts.append("Point to \(name(winner)).")
-        if let leader = leader(of: score) {
-            parts.append("\(name(leader)) leads \(score[leader]) to \(score[leader.opponent]).")
-        } else {
-            parts.append("\(score.a) all.")
-        }
-        queue.append(CommentaryLine(text: parts.joined(separator: " "), kind: .call, createdAt: now))
+        let server = score.server(firstServer: config.firstServer, target: target, servesPerTurn: config.servesPerTurn)
+        queue.append(CommentaryLine(text: Umpire.call(score, server: server, target: target, name: name), kind: .call, createdAt: now))
         if let lastHit = point.lastHit, lastHit.side == winner, lastHit.strength > Self.smashStrength {
-            highlight("Smash winner from \(name(winner))!", at: now)
+            highlight(Umpire.smash(name(winner)), at: now)
         }
-        if score.a == score.b, score.a >= target - 1 {
-            highlight("Deuce!", at: now)
-        } else if let leader = leader(of: score), score[leader] >= target - 1 {
-            highlight("Match point, \(name(leader)).", at: now)
+        if let leader = leader(of: score), score[leader] >= target - 1, score[leader.opponent] < target - 1 {
+            highlight(Umpire.matchPoint(name(leader)), at: now)
         }
     }
 

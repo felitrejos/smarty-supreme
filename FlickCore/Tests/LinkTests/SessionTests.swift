@@ -140,19 +140,6 @@ struct TwoPlayerMatchTests {
         #expect(events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
     }
 
-    @Test func everyPhoneSwingRecordsHowLongItTookToReachTheGame() throws {
-        let harness = SessionHarness(mode: .twoPlayers, conditions: LinkConditions(latency: 20_000))
-        harness.addBot("Phone A", side: .playerA)
-        harness.addBot("Phone B", side: .playerB)
-        harness.run(for: 2_000_000)
-        harness.session.startNow()
-        harness.run(until: { $0.session.game.rally >= 6 })
-
-        let latency = try #require(harness.session.swingLatency.percentile(0.95))
-
-        #expect((20_000...20_000 + SessionHarness.frameMicroseconds).contains(latency))
-    }
-
     @Test func playerAsPhoneNeverMovesOrSwingsForPlayerB() {
         let harness = SessionHarness(mode: .twoPlayers)
         let phoneA = harness.addPhone("Phone A", holding: 0.5)

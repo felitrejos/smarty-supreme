@@ -56,6 +56,19 @@ targets:
       - Apps/Style
       - path: Assets/Lighting
         buildPhase: resources
+        excludes: ["*.md"]
+      - path: Assets/Models
+        type: folder
+        buildPhase: resources
+      - path: Assets/Textures
+        type: folder
+        buildPhase: resources
+      - path: Assets/Voice
+        type: folder
+        buildPhase: resources
+      - path: Assets/Crowd
+        type: folder
+        buildPhase: resources
       - path: Assets/Sounds
         buildPhase: resources
         excludes: ["*.md"]

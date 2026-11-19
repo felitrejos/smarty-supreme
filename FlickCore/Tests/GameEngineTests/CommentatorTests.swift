@@ -4,66 +4,37 @@ import Testing
 struct CommentatorTests {
     private let names: [Side: String] = [.playerA: "Player A", .playerB: "Computer"]
 
-    @Test func aPointIsCalledWithTheWinnerAndTheScore() {
+    @Test(arguments: [
+        (Score(a: 1, b: 0), "One, love."),
+        (Score(a: 2, b: 1), "One, two."),
+        (Score(a: 7, b: 5), "Seven, five."),
+        (Score(a: 4, b: 4), "Four all."),
+        (Score(a: 10, b: 10), "Deuce."),
+        (Score(a: 11, b: 10), "Advantage, Player A."),
+        (Score(a: 12, b: 13), "Advantage, Computer."),
+    ])
+    func eachPointIsCalledLikeAnUmpireWithTheServersScoreFirst(score: Score, call: String) {
         var commentator = Commentator(names: names)
-        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 7, b: 5))], target: 11, at: 0)
+        commentator.observe([.pointScored(winner: .playerA, score: score)], at: 0)
 
-        #expect(commentator.next(at: 0, duringRally: false)?.text == "Point to Player A. Player A leads 7 to 5.")
+        #expect(commentator.next(at: 0, duringRally: false)?.text == call)
     }
 
-    @Test func aTiedScoreIsCalledAsAll() {
+    @Test func aSmashWinnerIsAHighlightAfterTheCall() {
         var commentator = Commentator(names: names)
-        commentator.observe([.pointScored(winner: .playerB, score: Score(a: 4, b: 4))], target: 11, at: 0)
-
-        #expect(commentator.next(at: 0, duringRally: false)?.text == "Point to Computer. 4 all.")
-    }
-
-    @Test func aWhiffThatLosesThePointIsMentioned() {
-        var commentator = Commentator(names: names)
-        commentator.observe([.whiff(.playerB)], target: 11, at: 0)
-        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 1, b: 0))], target: 11, at: 0)
-
-        #expect(commentator.next(at: 0, duringRally: false)?.text == "Computer whiffs. Point to Player A. Player A leads 1 to 0.")
-    }
-
-    @Test func anEdgeWinnerIsMentioned() {
-        var commentator = Commentator(names: names)
-        commentator.observe([.hit(.playerA, strength: 0.5, rally: 1), .edgeHit(.playerA)], target: 11, at: 0)
-        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 1, b: 0))], target: 11, at: 0)
-
-        #expect(commentator.next(at: 0, duringRally: false)?.text == "Off the edge from Player A. Point to Player A. Player A leads 1 to 0.")
-    }
-
-    @Test func aSmashWinnerIsAHighlightSpokenAfterTheCall() {
-        var commentator = Commentator(names: names)
-        commentator.observe([.hit(.playerA, strength: 0.9, rally: 3)], target: 11, at: 0)
-        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 2, b: 1))], target: 11, at: 0)
+        commentator.observe([.hit(.playerA, strength: 0.9, rally: 3)], at: 0)
+        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 2, b: 1))], at: 0)
 
         #expect(commentator.next(at: 0, duringRally: false)?.kind == .call)
-        #expect(commentator.next(at: 0, duringRally: false) == CommentaryLine(text: "Smash winner from Player A!", kind: .highlight, createdAt: 0))
+        #expect(commentator.next(at: 0, duringRally: false) == CommentaryLine(text: "Smash winner, Player A!", kind: .highlight, createdAt: 0))
         #expect(commentator.next(at: 0, duringRally: false) == nil)
-    }
-
-    @Test func theScoreIsCalledEvenIfTheNextRallyStartsBeforeTheHighlight() {
-        var commentator = Commentator(names: names)
-        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 10, b: 10))], target: 11, at: 0)
-
-        #expect(commentator.next(at: 0, duringRally: false)?.text == "Point to Player A. 10 all.")
-        #expect(commentator.next(at: 500_000, duringRally: true)?.text == "Deuce!")
-    }
-
-    @Test func aForfeitIsCalled() {
-        var commentator = Commentator(names: names)
-        commentator.observe([.gameOver(winner: .playerB)], target: 11, at: 0)
-
-        #expect(commentator.next(at: 0, duringRally: false)?.text == "Game to Computer by forfeit.")
     }
 
     @Test func aSmashThatComesBackIsNotAWinner() {
         var commentator = Commentator(names: names)
-        commentator.observe([.hit(.playerA, strength: 0.9, rally: 3)], target: 11, at: 0)
-        commentator.observe([.hit(.playerB, strength: 0.4, rally: 4)], target: 11, at: 0)
-        commentator.observe([.pointScored(winner: .playerB, score: Score(a: 1, b: 2))], target: 11, at: 0)
+        commentator.observe([.hit(.playerA, strength: 0.9, rally: 3)], at: 0)
+        commentator.observe([.hit(.playerB, strength: 0.4, rally: 4)], at: 0)
+        commentator.observe([.pointScored(winner: .playerB, score: Score(a: 1, b: 2))], at: 0)
 
         #expect(commentator.next(at: 0, duringRally: false)?.kind == .call)
         #expect(commentator.next(at: 0, duringRally: false) == nil)
@@ -72,49 +43,52 @@ struct CommentatorTests {
     @Test func aRallyOfTenIsAHighlightSpokenDuringTheRally() {
         var commentator = Commentator(names: names)
         for rally in 1...12 {
-            commentator.observe([.hit(rally.isMultiple(of: 2) ? .playerB : .playerA, strength: 0.5, rally: rally)], target: 11, at: 0)
+            commentator.observe([.hit(rally.isMultiple(of: 2) ? .playerB : .playerA, strength: 0.5, rally: rally)], at: 0)
         }
 
-        #expect(commentator.next(at: 0, duringRally: true)?.text == "Rally of 10!")
+        #expect(commentator.next(at: 0, duringRally: true)?.text == "What a rally!")
         #expect(commentator.next(at: 0, duringRally: true) == nil)
     }
 
     @Test func eachPointGetsAtMostOneCallAndOneHighlight() {
         var commentator = Commentator(names: names)
         for rally in 1...10 {
-            commentator.observe([.hit(rally.isMultiple(of: 2) ? .playerB : .playerA, strength: 0.9, rally: rally)], target: 11, at: 0)
+            commentator.observe([.hit(rally.isMultiple(of: 2) ? .playerB : .playerA, strength: 0.9, rally: rally)], at: 0)
         }
-        commentator.observe([.pointScored(winner: .playerB, score: Score(a: 10, b: 10))], target: 11, at: 0)
+        commentator.observe([.pointScored(winner: .playerB, score: Score(a: 3, b: 10))], at: 0)
 
         let lines = [commentator.next(at: 0, duringRally: false), commentator.next(at: 0, duringRally: false), commentator.next(at: 0, duringRally: false)]
         #expect(lines.compactMap(\.?.kind) == [.highlight, .call])
-        #expect(lines[0]?.text == "Rally of 10!")
     }
 
-    @Test(arguments: [
-        (Score(a: 10, b: 10), "Deuce!"),
-        (Score(a: 10, b: 9), "Match point, Player A."),
-        (Score(a: 11, b: 12), "Match point, Computer."),
-    ])
-    func deuceAndMatchPointAreHighlights(score: Score, highlight: String) {
+    @Test(arguments: [(Score(a: 10, b: 9), "Match point, Player A."), (Score(a: 4, b: 10), "Match point, Computer.")])
+    func matchPointIsAHighlight(score: Score, highlight: String) {
         var commentator = Commentator(names: names)
-        commentator.observe([.pointScored(winner: score.a > score.b ? .playerA : .playerB, score: score)], target: 11, at: 0)
+        commentator.observe([.pointScored(winner: score.a > score.b ? .playerA : .playerB, score: score)], at: 0)
         _ = commentator.next(at: 0, duringRally: false)
 
         #expect(commentator.next(at: 0, duringRally: false)?.text == highlight)
     }
 
-    @Test func theGameEndIsOneCallWithTheFinalScore() {
+    @Test(arguments: [(Score(a: 6, b: 11), "Game, Computer. Eleven, six."), (Score(a: 12, b: 14), "Game, Computer.")])
+    func theGameEndIsOneCall(score: Score, call: String) {
         var commentator = Commentator(names: names)
-        commentator.observe([.pointScored(winner: .playerB, score: Score(a: 6, b: 11)), .gameOver(winner: .playerB)], target: 11, at: 0)
+        commentator.observe([.pointScored(winner: .playerB, score: score), .gameOver(winner: .playerB)], at: 0)
 
-        #expect(commentator.next(at: 0, duringRally: false)?.text == "Game to Computer, 11 to 6!")
+        #expect(commentator.next(at: 0, duringRally: false)?.text == call)
         #expect(commentator.next(at: 0, duringRally: false) == nil)
+    }
+
+    @Test func aForfeitIsCalled() {
+        var commentator = Commentator(names: names)
+        commentator.observe([.gameOver(winner: .playerB)], at: 0)
+
+        #expect(commentator.next(at: 0, duringRally: false)?.text == "Game, Computer, by forfeit.")
     }
 
     @Test func callsWaitWhileARallyIsOn() {
         var commentator = Commentator(names: names)
-        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 1, b: 0))], target: 11, at: 0)
+        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 1, b: 0))], at: 0)
 
         #expect(commentator.next(at: 500_000, duringRally: true) == nil)
         #expect(commentator.next(at: 600_000, duringRally: false)?.kind == .call)
@@ -122,11 +96,41 @@ struct CommentatorTests {
 
     @Test func linesOlderThanThreeSecondsAreDropped() {
         var commentator = Commentator(names: names)
-        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 1, b: 0))], target: 11, at: 1_000_000)
-        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 2, b: 0))], target: 11, at: 3_500_000)
+        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 1, b: 0))], at: 1_000_000)
+        commentator.observe([.pointScored(winner: .playerA, score: Score(a: 2, b: 0))], at: 3_500_000)
 
-        #expect(commentator.next(at: 4_000_001, duringRally: false)?.text == "Point to Player A. Player A leads 2 to 0.")
+        #expect(commentator.next(at: 4_000_001, duringRally: false)?.text == "Love, two.")
         #expect(commentator.next(at: 4_000_001, duringRally: false) == nil)
+    }
+
+    @Test func everyLineTheRefereeCanSayHasARecording() {
+        let recorded = Set(Umpire.everyLine(names: ["Player A", "Player B", "Computer"], target: 11))
+        var random = SplitMix64(seed: 3)
+        var said: Set<String> = []
+        for _ in 0..<120 {
+            var game = GameState(seed: random.next())
+            var commentator = Commentator(names: names)
+            while true {
+                var input = StepInput(targetA: Double.random(in: 0...1, using: &random), targetB: Double.random(in: 0...1, using: &random))
+                if Int.random(in: 0..<30, using: &random) == 0 {
+                    input.swings = [Swing(side: Bool.random(using: &random) ? .playerA : .playerB, step: game.step, strength: Double.random(in: 0...1, using: &random), aim: 0)]
+                }
+                commentator.observe(game.step(input), at: 0)
+                while let line = commentator.next(at: 0, duringRally: false) {
+                    said.insert(line.text)
+                }
+                if case .gameOver = game.phase { break }
+            }
+        }
+
+        #expect(said.subtracting(recorded).isEmpty, "Not recorded: \(said.subtracting(recorded).sorted())")
+        #expect(said.count > 40)
+    }
+
+    @Test func everyRecordingHasItsOwnFileName() {
+        let lines = Umpire.everyLine(names: ["Player A", "Player B", "Computer"], target: 11) + OpponentLine.allCases.flatMap(\.lines)
+
+        #expect(Set(lines.map(VoiceClip.name)).count == lines.count)
     }
 }
 
@@ -148,7 +152,7 @@ struct OpponentLineTests {
     ])
     func theComputerReactsToWhatJustHappened(events: [GameEvent], reaction: OpponentLine) {
         var commentator = Commentator(names: names, opponent: .playerB, seed: 1)
-        commentator.observe(events, target: 11, at: 0)
+        commentator.observe(events, at: 0)
 
         let lines = drain(&commentator)
         #expect(lines.filter { $0.kind == .opponent }.map(\.text).allSatisfy(reaction.lines.contains))
@@ -157,14 +161,14 @@ struct OpponentLineTests {
 
     @Test func theComputerSpeaksAfterTheReferee() {
         var commentator = Commentator(names: names, opponent: .playerB, seed: 1)
-        commentator.observe([.hit(.playerB, strength: 0.9, rally: 2), .pointScored(winner: .playerB, score: Score(a: 1, b: 2))], target: 11, at: 0)
+        commentator.observe([.hit(.playerB, strength: 0.9, rally: 2), .pointScored(winner: .playerB, score: Score(a: 1, b: 2))], at: 0)
 
         #expect(drain(&commentator).map(\.kind) == [.call, .highlight, .opponent])
     }
 
     @Test func theComputerWaitsForTheRallyToEnd() {
         var commentator = Commentator(names: names, opponent: .playerB, seed: 1)
-        commentator.observe([.whiff(.playerA), .pointScored(winner: .playerB, score: Score(a: 1, b: 2))], target: 11, at: 0)
+        commentator.observe([.whiff(.playerA), .pointScored(winner: .playerB, score: Score(a: 1, b: 2))], at: 0)
         _ = commentator.next(at: 0, duringRally: false)
 
         #expect(commentator.next(at: 0, duringRally: true) == nil)
@@ -175,7 +179,7 @@ struct OpponentLineTests {
         var commentator = Commentator(names: names, opponent: .playerB, seed: 7)
         var reactions = 0
         for point in 1...100 {
-            commentator.observe([.hit(.playerA, strength: 0.5, rally: 2), .pointScored(winner: .playerA, score: Score(a: point % 3, b: 0))], target: 11, at: 0)
+            commentator.observe([.hit(.playerA, strength: 0.5, rally: 2), .pointScored(winner: .playerA, score: Score(a: point % 3, b: 0))], at: 0)
             reactions += drain(&commentator).filter { $0.kind == .opponent }.count
         }
 
@@ -186,7 +190,7 @@ struct OpponentLineTests {
         var commentator = Commentator(names: names, opponent: .playerB, seed: 3)
         var said: [String] = []
         for _ in 1...20 {
-            commentator.observe([.whiff(.playerA), .pointScored(winner: .playerB, score: Score(a: 0, b: 1))], target: 11, at: 0)
+            commentator.observe([.whiff(.playerA), .pointScored(winner: .playerB, score: Score(a: 0, b: 1))], at: 0)
             said += drain(&commentator).filter { $0.kind == .opponent }.map(\.text)
         }
 
@@ -196,7 +200,7 @@ struct OpponentLineTests {
 
     @Test func withoutAComputerNobodyReacts() {
         var commentator = Commentator(names: names)
-        commentator.observe([.whiff(.playerA), .pointScored(winner: .playerB, score: Score(a: 1, b: 2))], target: 11, at: 0)
+        commentator.observe([.whiff(.playerA), .pointScored(winner: .playerB, score: Score(a: 1, b: 2))], at: 0)
 
         #expect(!drain(&commentator).contains { $0.kind == .opponent })
     }

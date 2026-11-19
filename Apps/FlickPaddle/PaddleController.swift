@@ -14,7 +14,6 @@ final class PaddleController {
     let launchedAt: Microseconds
     let networkFailure = NetworkFailure()
     let haptics = HapticPlayer()
-    let stats = DeviceStats()
 
     private let motion: MotionService
     private let transport: MultipeerTransport
@@ -56,7 +55,6 @@ final class PaddleController {
         }
         pointerTimer = makePointerTimer()
         haptics.prepare()
-        stats.start()
         UIApplication.shared.isIdleTimerDisabled = true
     }
 

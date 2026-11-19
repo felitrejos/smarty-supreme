@@ -13,7 +13,10 @@ An iPhone is the paddle, a Mac is the table. Tilt the phone to move your paddle 
 | `Apps/Shared/` | Core Motion wrapper shared by the iPhone apps |
 | `Apps/Link/` | MultipeerConnectivity transport shared by the paddle and the Mac |
 | `Apps/Style/` | Player names and colours shared by the paddle and the Mac |
-| `Assets/Lighting/` | Studio HDRI from Poly Haven (CC0) used to light the table |
+| `Assets/Lighting/`, `Assets/Models/`, `Assets/Textures/` | The arena photo, chair model and wood textures from Poly Haven (CC0); credits in [CREDITS.md](Assets/Lighting/CREDITS.md) |
+| `Assets/Crowd/` | Spectator cards rendered from CC0 MakeHuman people |
+| `Assets/Voice/` | Every umpire call and computer line, rendered with Kokoro |
+| `Tools/` | `render_voice.py` (re-render the voices), `glb_to_usdz.py` and `render_crowd_sprites.swift` (turn a GLB model into crowd cards) |
 | `Assets/Sounds/` | Paddle, table and crowd sounds cut from CC0 Freesound recordings; sources in [CREDITS.md](Assets/Sounds/CREDITS.md) |
 | `Fixtures/` | Recorded motion data, once recorded: `recordings/` as exported, then `tuning/` (70%) and `holdout/` (30%) |
 | `project.yml` | XcodeGen spec. The Xcode project is generated, not committed. |
@@ -71,9 +74,19 @@ During a match:
 
 On an iPhone without motion sensors (the simulator), drag along the bar to move and swipe up to swing.
 
-### Referee
+### Umpire and crowd
 
-The Mac calls the score out loud: one line per point, plus a highlight for a rally of 10, a smash winner, deuce or match point. Against the computer, the computer answers back in its own voice now and then: a taunt after a smash, a groan after a lucky edge, nerves at match point. Game › Commentary turns both off. They use the Mac's system voices; for the best sound, download Premium English voices in System Settings › Accessibility › Spoken Content.
+The match plays in a 1950s arena modelled on the London tournament in *Marty Supreme*. An umpire calls every point the way real umpires do ("seven, five", "deuce", "game, Player A"), with a highlight for a rally of 10, a smash winner or match point, and the flip cards on the umpire's table follow the score. Against the computer, the computer answers back in its own voice now and then. Game › Commentary turns both voices off.
+
+The voices are recordings made with the open Kokoro model. To change a voice or a line, edit `Umpire.swift` or `OpponentLine.swift`, then re-render:
+
+```bash
+swift run --package-path FlickCore flick-voice-lines > lines.json
+```
+
+```bash
+python Tools/render_voice.py lines.json Assets/Voice
+```
 
 ## Recording the motion dataset
 
@@ -91,16 +104,3 @@ swift run --package-path FlickCore flick-fixtures summary Fixtures/recordings
 ```bash
 swift run --package-path FlickCore flick-fixtures split Fixtures/recordings Fixtures
 ```
-
-## Measuring on real devices
-
-| Target | Where to read it |
-| --- | --- |
-| Pairing in 5 s or less | The phone shows how long it took to pair after opening |
-| Round trip p95 at most 15 ms, tilt updates at least 55 a second | The iPhone Paddles window (⌘0), each with a pass or fail mark |
-| 99% of frames under 8.3 ms, none dropped over 60 s | View › Show Frame Times (⌥⌘F), with a Release build in front on a 120 Hz display |
-| Player B's screen within 15 ms of the host (95%) | Show Frame Times on the second Mac |
-| Swing to the game p95, Mac CPU at most 20% of a core, memory growth under 5 MB | Show Frame Times; values over budget turn orange |
-| iPhone CPU at most 15%, battery at most 8% per 30 min | The footer of the paddle app; battery shows while unplugged |
-| Commentary within 1.5 s of the play (95%) | Show Frame Times, once the referee has spoken |
-| Engine step p99 under 0.1 ms | `EngineBenchmarkTests`, part of the test run |

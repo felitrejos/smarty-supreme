@@ -8,56 +8,86 @@ enum Equipment {
         static let metresPerTableLength: Float = 2.74
         static let tableHeight: Float = 0.76
         static let topThickness: Float = 0.025
+        static let apronDepth: Float = 0.07
+        static let legSide: Float = 0.07
         static let netHeight: Float = 0.1525
         static let netOverhang: Float = 0.1525
         static let ballRadius: Float = 0.02
         static let bladeWidth: Float = 0.15
         static let bladeHeight: Float = 0.158
         static let bladeThickness: Float = 0.0058
-        static let rubberThickness: Float = 0.0021
+        static let rubberThickness: Float = 0.0015
         static let handleLength: Float = 0.1
+        static let floorRadius: Float = 16
+        static let courtLength: Float = 12
+        static let courtWidth: Float = 6.5
+        static let surroundHeight: Float = 0.7
+        static let surroundPanel: Float = 2
+        static let fillIntensity: Float = 420
+    }
+
+    enum Tone {
+        static let lamp = NSColor(red: 1.0, green: 0.8, blue: 0.56, alpha: 1)
+        static let celluloid = NSColor(red: 0.96, green: 0.94, blue: 0.87, alpha: 1)
+        static let iron = NSColor(white: 0.08, alpha: 1)
+        static let room = NSColor(red: 0.03, green: 0.025, blue: 0.02, alpha: 1)
+        static let apron = NSColor(red: 0.05, green: 0.13, blue: 0.1, alpha: 1)
+        static let surround = NSColor(red: 0.17, green: 0.23, blue: 0.32, alpha: 1)
     }
 
     @MainActor
     struct Materials {
         let top: PhysicallyBasedMaterial
-        let aluminium: PhysicallyBasedMaterial
-        let graphite: PhysicallyBasedMaterial
-        let wood: PhysicallyBasedMaterial
-        let rubberNormal: TextureResource
+        let frame: PhysicallyBasedMaterial
+        let apron: PhysicallyBasedMaterial
+        let surround: PhysicallyBasedMaterial
+        let blade: PhysicallyBasedMaterial
+        let floor: PhysicallyBasedMaterial
+        let fog: UnlitMaterial
+        let iron: PhysicallyBasedMaterial
+        let pips: TextureResource
         let net: PhysicallyBasedMaterial
         let shadow: UnlitMaterial
-        let backdrop: UnlitMaterial
 
         static func make(tableWidth: Float) async throws -> Materials {
             async let topImage = Textures.tableTop(widthMetres: Double(tableWidth), seed: 7)
-            async let woodImage = Textures.woodGrain(seed: 8)
-            async let rubberImage = Textures.rubberGrain(seed: 9)
+            async let pipsImage = Textures.pimpledRubber()
             async let netImage = Textures.netMesh(cellsAcross: 122, cellsDown: 10)
             async let shadowImage = Textures.softShadow()
-            async let backdropImage = Textures.backdrop()
+            async let fogImage = Textures.floorFog()
 
             var top = PhysicallyBasedMaterial()
             top.baseColor = .init(texture: .init(try await Textures.texture(await topImage, .color)))
-            top.roughness = 0.58
-            top.clearcoat = 0.12
-            top.clearcoatRoughness = 0.4
+            top.roughness = 0.68
+            top.clearcoat = 0.08
+            top.clearcoatRoughness = 0.5
 
-            var aluminium = PhysicallyBasedMaterial()
-            aluminium.baseColor = .init(tint: NSColor(white: 0.7, alpha: 1))
-            aluminium.metallic = 1.0
-            aluminium.roughness = 0.32
+            var frame = try await Textures.surface("coated_pine")
+            frame.clearcoat = 0.45
+            frame.clearcoatRoughness = 0.3
 
-            var graphite = PhysicallyBasedMaterial()
-            graphite.baseColor = .init(tint: NSColor(white: 0.13, alpha: 1))
-            graphite.metallic = 0.85
-            graphite.roughness = 0.35
+            let blade = try await Textures.surface("plywood")
 
-            var wood = PhysicallyBasedMaterial()
-            wood.baseColor = .init(texture: .init(try await Textures.texture(await woodImage, .color)))
-            wood.roughness = 0.5
-            wood.clearcoat = 0.4
-            wood.clearcoatRoughness = 0.3
+            var apron = PhysicallyBasedMaterial()
+            apron.baseColor = .init(tint: Tone.apron)
+            apron.roughness = 0.45
+            apron.clearcoat = 0.4
+
+            var surround = try await Textures.surface("black_painted_planks", repeats: 2)
+            surround.baseColor = .init(tint: Tone.surround)
+            surround.clearcoat = 0.7
+            surround.clearcoatRoughness = 0.35
+
+            let floor = try await Textures.surface("old_wooden_floor_02", repeats: Size.floorRadius)
+
+            var fog = UnlitMaterial()
+            fog.color = .init(tint: Tone.room, texture: .init(try await Textures.texture(await fogImage, .color)))
+            fog.blending = .transparent(opacity: 1.0)
+
+            var iron = PhysicallyBasedMaterial()
+            iron.baseColor = .init(tint: Tone.iron)
+            iron.metallic = 0.8
+            iron.roughness = 0.45
 
             var net = PhysicallyBasedMaterial()
             net.baseColor = .init(texture: .init(try await Textures.texture(await netImage, .color, mipmaps: false)))
@@ -69,78 +99,156 @@ enum Equipment {
             shadow.color = .init(tint: .white, texture: .init(try await Textures.texture(await shadowImage, .color)))
             shadow.blending = .transparent(opacity: 1.0)
 
-            var backdrop = UnlitMaterial()
-            backdrop.color = .init(tint: .white, texture: .init(try await Textures.texture(await backdropImage, .color)))
-
             return Materials(
                 top: top,
-                aluminium: aluminium,
-                graphite: graphite,
-                wood: wood,
-                rubberNormal: try await Textures.texture(await rubberImage, .normal),
+                frame: frame,
+                apron: apron,
+                surround: surround,
+                blade: blade,
+                floor: floor,
+                fog: fog,
+                iron: iron,
+                pips: try await Textures.texture(await pipsImage, .normal),
                 net: net,
-                shadow: shadow,
-                backdrop: backdrop
+                shadow: shadow
             )
         }
 
         func rubber(_ color: NSColor) -> PhysicallyBasedMaterial {
             var rubber = PhysicallyBasedMaterial()
             rubber.baseColor = .init(tint: color)
-            rubber.normal = .init(texture: .init(rubberNormal))
-            rubber.roughness = 0.62
-            rubber.clearcoat = 0.18
-            rubber.clearcoatRoughness = 0.45
+            rubber.normal = .init(texture: .init(pips))
+            rubber.textureCoordinateTransform = .init(scale: [3, 3])
+            rubber.roughness = 0.7
             return rubber
         }
     }
 
-    static func backdrop(_ materials: Materials) -> Entity {
-        let sphere = ModelEntity(mesh: .generateSphere(radius: 30), materials: [materials.backdrop])
-        sphere.scale = [-1, 1, 1]
-        return sphere
+    static func floor(_ materials: Materials) -> Entity {
+        let size = Size.floorRadius * 2
+        let floor = ModelEntity(mesh: .generatePlane(width: size, depth: size), materials: [materials.floor])
+        floor.position.y = -0.002
+        let fog = ModelEntity(mesh: .generatePlane(width: size, depth: size), materials: [materials.fog])
+        fog.position.y = 0.002
+        floor.addChild(fog)
+        return floor
     }
 
     static func contactShadow(_ materials: Materials, width: Float) -> Entity {
-        let shadow = ModelEntity(mesh: .generatePlane(width: width * 1.9, depth: Size.metresPerTableLength * 1.25), materials: [materials.shadow])
+        let shadow = ModelEntity(mesh: .generatePlane(width: width * 1.7, depth: Size.metresPerTableLength * 1.2), materials: [materials.shadow])
         shadow.position.y = 0.001
         return shadow
     }
 
-    static func table(_ materials: Materials, width: Float) throws -> Entity {
+    static func table(_ materials: Materials, width: Float) -> Entity {
         let table = Entity()
         let length = Size.metresPerTableLength
         let top = ModelEntity(
-            mesh: .generateBox(width: width, height: Size.topThickness, depth: length, cornerRadius: 0.006, splitFaces: true),
-            materials: [materials.graphite, materials.top, materials.graphite, materials.graphite, materials.graphite, materials.graphite]
+            mesh: .generateBox(width: width, height: Size.topThickness, depth: length, cornerRadius: 0.003, splitFaces: true),
+            materials: [materials.frame, materials.top, materials.frame, materials.frame, materials.frame, materials.frame]
         )
         top.position.y = Size.tableHeight - Size.topThickness / 2
         table.addChild(top)
 
-        let underframe = ModelEntity(mesh: .generateBox(width: width - 0.12, height: 0.035, depth: length - 0.18, cornerRadius: 0.01), materials: [materials.graphite])
-        underframe.position.y = Size.tableHeight - Size.topThickness - 0.0175
-        table.addChild(underframe)
-
-        let curve = (0...48).map { index -> SIMD2<Float> in
-            let t = Float(index) / 48
-            let start: SIMD2<Float> = [0.16, 0.02]
-            let lift: SIMD2<Float> = [0.16, 0.5]
-            let reach: SIMD2<Float> = [0.62, 0.70]
-            let end: SIMD2<Float> = [1.02, Size.tableHeight - Size.topThickness - 0.035]
-            let u = 1 - t
-            return u * u * u * start + 3 * u * u * t * lift + 3 * u * t * t * reach + t * t * t * end
+        let apronY = Size.tableHeight - Size.topThickness - Size.apronDepth / 2
+        for side: Float in [-1, 1] {
+            let long = ModelEntity(mesh: .generateBox(width: 0.022, height: Size.apronDepth, depth: length - 0.04), materials: [materials.apron])
+            long.position = [side * (width / 2 - 0.011), apronY, 0]
+            let short = ModelEntity(mesh: .generateBox(width: width, height: Size.apronDepth, depth: 0.022), materials: [materials.apron])
+            short.position = [0, apronY, side * (length / 2 - 0.011)]
+            table.addChild(long)
+            table.addChild(short)
         }
-        for side: Float in [1, -1] {
-            let mirrored = curve.map { SIMD2($0.x * side, $0.y) }
-            let blade = try Geometry.sweptBlade(along: mirrored, width: width - 0.42, thickness: 0.05)
-            table.addChild(ModelEntity(mesh: blade, materials: [materials.aluminium]))
+        let legHeight = Size.tableHeight - Size.topThickness - 0.03
+        for end: Float in [-0.62, -0.06, 0.06, 0.62] {
+            let z = end * length
+            for across: Float in [-1, 1] {
+                let leg = ModelEntity(mesh: .generateBox(width: Size.legSide, height: legHeight, depth: 0.05, cornerRadius: 0.006), materials: [materials.frame])
+                leg.position = [across * (width / 2 - 0.16), legHeight / 2, z * 0.62]
+                table.addChild(leg)
+                let foot = ModelEntity(mesh: .generateBox(width: 0.08, height: 0.035, depth: 0.32, cornerRadius: 0.01), materials: [materials.frame])
+                foot.position = [across * (width / 2 - 0.16), 0.018, z * 0.62]
+                table.addChild(foot)
+            }
+            let rail = ModelEntity(mesh: .generateBox(width: width - 0.32, height: 0.05, depth: 0.04), materials: [materials.frame])
+            rail.position = [0, 0.22, z * 0.62]
+            table.addChild(rail)
         }
-        let plinth = ModelEntity(mesh: .generateBox(width: width - 0.36, height: 0.03, depth: 0.46, cornerRadius: 0.012), materials: [materials.aluminium])
-        plinth.position.y = 0.015
-        table.addChild(plinth)
+        let spine = ModelEntity(mesh: .generateBox(width: 0.05, height: 0.05, depth: length * 0.8), materials: [materials.frame])
+        spine.position = [0, 0.22, 0]
+        table.addChild(spine)
 
         table.addChild(net(materials, tableWidth: width))
         return table
+    }
+
+    static func model(_ name: String) async throws -> Entity {
+        let url = Bundle.main.url(forResource: "\(name)_1k", withExtension: "usdc", subdirectory: "Models/\(name)")!
+        return try await Entity(contentsOf: url)
+    }
+
+    static func surrounds(_ materials: Materials) -> Entity {
+        let surrounds = Entity()
+        let halfLength = Size.courtLength / 2
+        let halfWidth = Size.courtWidth / 2
+        func run(from start: SIMD2<Float>, to end: SIMD2<Float>) {
+            let span = simd_distance(start, end)
+            let panels = Int((span / Size.surroundPanel).rounded(.up))
+            let direction = (end - start) / span
+            let length = span / Float(panels)
+            for index in 0..<panels {
+                let centre = start + direction * (Float(index) + 0.5) * length
+                let panel = ModelEntity(mesh: .generateBox(width: length - 0.03, height: Size.surroundHeight, depth: 0.04, cornerRadius: 0.004), materials: [materials.surround])
+                panel.position = [centre.x, Size.surroundHeight / 2, centre.y]
+                panel.orientation = simd_quatf(angle: atan2(-direction.y, direction.x), axis: [0, 1, 0])
+                let rail = ModelEntity(mesh: .generateBox(width: length - 0.02, height: 0.03, depth: 0.06, cornerRadius: 0.006), materials: [materials.frame])
+                rail.position.y = Size.surroundHeight / 2 + 0.015
+                panel.addChild(rail)
+                surrounds.addChild(panel)
+            }
+        }
+        run(from: [-halfWidth, -halfLength], to: [halfWidth, -halfLength])
+        run(from: [-halfWidth, halfLength], to: [halfWidth, halfLength])
+        run(from: [-halfWidth, -halfLength], to: [-halfWidth, halfLength])
+        run(from: [halfWidth, -halfLength], to: [halfWidth, halfLength])
+        return surrounds
+    }
+
+    static func lightingRig(intensity: Float, height: Float, spots: [SIMD2<Float>]) -> Entity {
+        let rig = Entity()
+        for (index, spot) in spots.enumerated() {
+            let light = SpotLight()
+            light.light.color = Tone.lamp
+            light.light.intensity = intensity
+            light.light.innerAngleInDegrees = 30
+            light.light.outerAngleInDegrees = 70
+            light.light.attenuationRadius = height * 2.5
+            if index == 0 {
+                light.shadow = SpotLightComponent.Shadow()
+            }
+            light.position = [spot.x, height, spot.y]
+            light.orientation = simd_quatf(angle: -.pi / 2, axis: [1, 0, 0])
+            rig.addChild(light)
+        }
+        for end: Float in [-1, 1] {
+            let fill = DirectionalLight()
+            fill.light.color = Tone.lamp
+            fill.light.intensity = Size.fillIntensity
+            fill.look(at: .zero, from: [0.4 * end, 2.2, 6 * end], relativeTo: nil)
+            rig.addChild(fill)
+        }
+        return rig
+    }
+
+    static func scoreStand(_ materials: Materials) -> (root: Entity, card: ModelEntity) {
+        let root = Entity()
+        let post = ModelEntity(mesh: .generateCylinder(height: 0.32, radius: 0.008), materials: [materials.iron])
+        post.position.y = 0.16
+        root.addChild(post)
+        let card = ModelEntity(mesh: .generatePlane(width: 0.2, height: 0.25), materials: [UnlitMaterial(color: .black)])
+        card.position.y = 0.42
+        root.addChild(card)
+        return (root, card)
     }
 
     private static func net(_ materials: Materials, tableWidth: Float) -> Entity {
@@ -151,16 +259,16 @@ enum Equipment {
         net.addChild(mesh)
 
         var tapeMaterial = PhysicallyBasedMaterial()
-        tapeMaterial.baseColor = .init(tint: NSColor(white: 0.95, alpha: 1))
-        tapeMaterial.roughness = 0.7
+        tapeMaterial.baseColor = .init(tint: Tone.celluloid)
+        tapeMaterial.roughness = 0.8
         let tape = ModelEntity(mesh: .generateBox(width: netWidth, height: 0.015, depth: 0.004, cornerRadius: 0.001), materials: [tapeMaterial])
         tape.position.y = Size.tableHeight + Size.netHeight - 0.0075
         net.addChild(tape)
 
         for side: Float in [-1, 1] {
-            let post = ModelEntity(mesh: .generateCylinder(height: Size.netHeight + 0.02, radius: 0.009), materials: [materials.aluminium])
+            let post = ModelEntity(mesh: .generateCylinder(height: Size.netHeight + 0.02, radius: 0.008), materials: [materials.iron])
             post.position = [side * netWidth / 2, Size.tableHeight + (Size.netHeight + 0.02) / 2 - 0.02, 0]
-            let clamp = ModelEntity(mesh: .generateBox(width: Size.netOverhang + 0.03, height: 0.03, depth: 0.04, cornerRadius: 0.008), materials: [materials.graphite])
+            let clamp = ModelEntity(mesh: .generateBox(width: Size.netOverhang + 0.03, height: 0.03, depth: 0.04, cornerRadius: 0.004), materials: [materials.iron])
             clamp.position = [side * (tableWidth / 2 + Size.netOverhang / 2 - 0.015), Size.tableHeight - 0.012, 0]
             net.addChild(post)
             net.addChild(clamp)
@@ -181,23 +289,23 @@ enum Equipment {
         let outline = Geometry.bladeOutline(width: Size.bladeWidth, height: Size.bladeHeight)
         let size = SIMD2(Size.bladeWidth, Size.bladeHeight)
         let halfCore = Size.bladeThickness / 2
-        let core = ModelEntity(mesh: try Geometry.bevelledSlab(outline: outline, bottom: -halfCore, top: halfCore, bevel: 0.0006, size: size), materials: [materials.wood])
+        let core = ModelEntity(mesh: try Geometry.bevelledSlab(outline: outline, bottom: -halfCore, top: halfCore, bevel: 0.0008, size: size), materials: [materials.blade])
         blade.addChild(core)
 
-        let rubberOutline = outline.map { $0 * 0.992 }
-        let sheet = try Geometry.bevelledSlab(outline: rubberOutline, bottom: halfCore, top: halfCore + Size.rubberThickness, bevel: 0.0012, size: size)
+        let rubberOutline = outline.map { $0 * 0.985 }
+        let sheet = try Geometry.bevelledSlab(outline: rubberOutline, bottom: halfCore, top: halfCore + Size.rubberThickness, bevel: 0.0004, size: size)
         let front = ModelEntity(mesh: sheet, materials: [materials.rubber(color)])
         front.orientation = simd_quatf(angle: .pi, axis: [0, 1, 0])
-        let back = ModelEntity(mesh: sheet, materials: [materials.rubber(NSColor(white: 0.07, alpha: 1))])
+        let back = ModelEntity(mesh: sheet, materials: [materials.rubber(color)])
         blade.addChild(front)
         blade.addChild(back)
 
         let handle = ModelEntity(
             mesh: try Geometry.loftedHandle(length: Size.handleLength) { t in
-                let flare = t * t
-                return [0.0125 + 0.0045 * flare, 0.0105 + 0.0025 * flare]
+                let flare = t * t * t
+                return [0.012 + 0.006 * flare, 0.0095 + 0.003 * flare]
             },
-            materials: [materials.wood]
+            materials: [materials.frame]
         )
         handle.position.y = grip - Size.bladeHeight / 2 + 0.012
         pivot.addChild(handle)
@@ -205,7 +313,7 @@ enum Equipment {
     }
 
     static func ghostBall() -> ModelEntity {
-        var material = UnlitMaterial(color: .white)
+        var material = UnlitMaterial(color: Tone.celluloid)
         material.blending = .transparent(opacity: 1.0)
         let ghost = ModelEntity(mesh: .generateSphere(radius: Size.ballRadius), materials: [material])
         ghost.isEnabled = false
@@ -214,10 +322,10 @@ enum Equipment {
 
     static func ball() -> ModelEntity {
         var material = PhysicallyBasedMaterial()
-        material.baseColor = .init(tint: NSColor(white: 0.97, alpha: 1))
-        material.roughness = 0.38
-        material.clearcoat = 0.5
-        material.clearcoatRoughness = 0.3
+        material.baseColor = .init(tint: Tone.celluloid)
+        material.roughness = 0.3
+        material.clearcoat = 0.6
+        material.clearcoatRoughness = 0.25
         return ModelEntity(mesh: .generateSphere(radius: Size.ballRadius), materials: [material])
     }
 }

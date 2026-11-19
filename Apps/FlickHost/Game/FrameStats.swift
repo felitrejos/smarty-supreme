@@ -5,68 +5,26 @@ import Observation
 @MainActor
 @Observable
 final class FrameStats {
-    struct Latencies: Equatable {
-        var swing: Microseconds?
-        var commentary: Microseconds?
-    }
-
-    static let commentaryBudget: Microseconds = 1_500_000
-    static let budget: TimeInterval = 1.0 / 120
-    static let cpuBudget = 0.2
-    static let memoryGrowthBudget: Int64 = 5_000_000
-    private static let droppedAfter: TimeInterval = 1.5 / 120
-    private static let window: TimeInterval = 60
     private static let summaryInterval: TimeInterval = 0.5
 
-    private(set) var percentile99: TimeInterval?
-    private(set) var dropped = 0
-    private(set) var measured: TimeInterval = 0
+    private(set) var framesPerSecond: Double?
     private(set) var cpuShare: Double?
-    private(set) var memoryBytes: UInt64 = 0
-    private(set) var memoryGrowth: Int64 = 0
-    private(set) var latencies = Latencies()
 
-    @ObservationIgnored private var frames: [TimeInterval] = []
-    @ObservationIgnored private var lastSample: ResourceSample?
-    @ObservationIgnored private var firstMemory: UInt64?
+    @ObservationIgnored private var frames = 0
     @ObservationIgnored private var sinceSummary: TimeInterval = 0
+    @ObservationIgnored private var lastSample: ResourceSample?
 
-    func record(_ frame: TimeInterval, latencies: () -> Latencies = { Latencies() }) {
-        frames.append(frame)
+    func record(_ frame: TimeInterval) {
+        frames += 1
         sinceSummary += frame
         guard sinceSummary >= Self.summaryInterval else { return }
+        framesPerSecond = Double(frames) / sinceSummary
+        frames = 0
         sinceSummary = 0
-        summarize()
-        sampleResources()
-        let current = latencies()
-        if self.latencies != current {
-            self.latencies = current
-        }
-    }
-
-    private func sampleResources() {
         let sample = ResourceSample.current()
         if let lastSample {
             cpuShare = sample.cpuShare(since: lastSample)
         }
         lastSample = sample
-        let first = firstMemory ?? sample.memoryBytes
-        firstMemory = first
-        memoryBytes = sample.memoryBytes
-        memoryGrowth = Int64(sample.memoryBytes) - Int64(first)
-    }
-
-    private func summarize() {
-        var total = frames.reduce(0, +)
-        var dropCount = 0
-        while total > Self.window, dropCount < frames.count {
-            total -= frames[dropCount]
-            dropCount += 1
-        }
-        frames.removeFirst(dropCount)
-        let sorted = frames.sorted()
-        percentile99 = sorted.isEmpty ? nil : sorted[Int(Double(sorted.count - 1) * 0.99)]
-        dropped = frames.filter { $0 > Self.droppedAfter }.count
-        measured = frames.reduce(0, +)
     }
 }

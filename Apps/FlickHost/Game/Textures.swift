@@ -1,4 +1,7 @@
+import AppKit
 import CoreGraphics
+import CoreText
+import Foundation
 import FlickCore
 import RealityKit
 
@@ -22,7 +25,19 @@ enum Textures {
         }
     }
 
-    private static let neighbours = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+    @MainActor
+    static func surface(_ name: String, repeats: Float = 1) async throws -> PhysicallyBasedMaterial {
+        func load(_ kind: String, _ semantic: TextureResource.Semantic) async throws -> TextureResource {
+            let url = Bundle.main.url(forResource: kind, withExtension: "jpg", subdirectory: "Textures/\(name)")!
+            return try await TextureResource(contentsOf: url, options: .init(semantic: semantic))
+        }
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(texture: .init(try await load("Diffuse", .color)))
+        material.roughness = .init(texture: .init(try await load("Rough", .raw)))
+        material.normal = .init(texture: .init(try await load("nor_gl", .normal)))
+        material.textureCoordinateTransform = .init(scale: [repeats, repeats])
+        return material
+    }
 
     @MainActor
     static func texture(_ image: CGImage, _ semantic: TextureResource.Semantic, mipmaps: Bool = true) async throws -> TextureResource {
@@ -34,7 +49,7 @@ enum Textures {
         var random = SplitMix64(seed: seed)
         let canvas = Canvas(width: 1536, height: 2760)
         let context = canvas.context
-        context.setFillColor(red: 0.075, green: 0.12, blue: 0.2, alpha: 1)
+        context.setFillColor(red: 0.04, green: 0.4, blue: 0.4, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height))
         for _ in 0..<90_000 {
             let lighter = Bool.random(using: &random)
@@ -44,7 +59,7 @@ enum Textures {
         let pixelsPerMetre = Double(canvas.width) / widthMetres
         let edge = 0.02 * pixelsPerMetre
         let centre = 0.003 * pixelsPerMetre
-        context.setFillColor(red: 0.95, green: 0.95, blue: 0.93, alpha: 1)
+        context.setFillColor(red: 0.93, green: 0.91, blue: 0.84, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: Double(canvas.width), height: edge))
         context.fill(CGRect(x: 0, y: Double(canvas.height) - edge, width: Double(canvas.width), height: edge))
         context.fill(CGRect(x: 0, y: 0, width: edge, height: Double(canvas.height)))
@@ -54,60 +69,50 @@ enum Textures {
     }
 
     @concurrent
-    static func woodGrain(seed: UInt64) async -> CGImage {
-        var random = SplitMix64(seed: seed)
-        let canvas = Canvas(width: 1024, height: 1024)
-        let context = canvas.context
-        context.setFillColor(red: 0.80, green: 0.64, blue: 0.45, alpha: 1)
-        context.fill(CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height))
-        for _ in 0..<260 {
-            let x = Double.random(in: 0..<Double(canvas.width), using: &random)
-            let amplitude = Double.random(in: 3...18, using: &random)
-            let frequency = Double.random(in: 0.003...0.012, using: &random)
-            let phase = Double.random(in: 0...(2 * .pi), using: &random)
-            let darker = Bool.random(using: &random)
-            context.setStrokeColor(red: darker ? 0.55 : 0.88, green: darker ? 0.40 : 0.72, blue: darker ? 0.26 : 0.52, alpha: Double.random(in: 0.15...0.45, using: &random))
-            context.setLineWidth(Double.random(in: 0.8...4, using: &random))
-            context.move(to: CGPoint(x: x, y: 0))
-            for y in stride(from: 0.0, through: Double(canvas.height), by: 8) {
-                context.addLine(to: CGPoint(x: x + sin(y * frequency + phase) * amplitude, y: y))
+    static func pimpledRubber() async -> CGImage {
+        let size = 512
+        let pips = 16
+        let spacing = Float(size) / Float(pips)
+        let radius = spacing * 0.36
+        let canvas = Canvas(width: size, height: size, colorSpace: CGColorSpace.linearSRGB)
+        let bytesPerRow = canvas.context.bytesPerRow
+        let pixels = canvas.context.data!.bindMemory(to: UInt8.self, capacity: size * bytesPerRow)
+        for row in 0..<size {
+            for column in 0..<size {
+                let lane = Int(Float(row) / spacing)
+                let shift = lane.isMultiple(of: 2) ? 0 : spacing / 2
+                let x = (Float(column) + shift).truncatingRemainder(dividingBy: spacing) - spacing / 2
+                let y = Float(row).truncatingRemainder(dividingBy: spacing) - spacing / 2
+                let distance = (x * x + y * y).squareRoot()
+                var normal = SIMD3<Float>(0, 0, 1)
+                if distance < radius, distance > radius * 0.55 {
+                    let slope = (distance - radius * 0.55) / (radius * 0.45)
+                    normal = simd_normalize(SIMD3(x / distance * slope * 1.6, -y / distance * slope * 1.6, 1))
+                }
+                let offset = row * bytesPerRow + column * 4
+                pixels[offset] = UInt8((normal.x * 0.5 + 0.5) * 255)
+                pixels[offset + 1] = UInt8((normal.y * 0.5 + 0.5) * 255)
+                pixels[offset + 2] = UInt8((normal.z * 0.5 + 0.5) * 255)
+                pixels[offset + 3] = 255
             }
-            context.strokePath()
         }
         return canvas.image
     }
 
     @concurrent
-    static func rubberGrain(seed: UInt64) async -> CGImage {
+    static func filmGrain(seed: UInt64) async -> CGImage {
         var random = SplitMix64(seed: seed)
-        let size = 512
-        var heights = (0..<size * size).map { _ in Float.random(in: 0...1, using: &random) }
-        for _ in 0..<2 {
-            var blurred = heights
-            for row in 0..<size {
-                for column in 0..<size {
-                    var total: Float = 0
-                    for (across, down) in neighbours {
-                        total += heights[((row + down + size) % size) * size + (column + across + size) % size]
-                    }
-                    blurred[row * size + column] = total / Float(neighbours.count)
-                }
-            }
-            heights = blurred
-        }
-        let canvas = Canvas(width: size, height: size, colorSpace: CGColorSpace.linearSRGB)
+        let size = 256
+        let canvas = Canvas(width: size, height: size)
         let bytesPerRow = canvas.context.bytesPerRow
         let pixels = canvas.context.data!.bindMemory(to: UInt8.self, capacity: size * bytesPerRow)
-        let strength: Float = 6
         for row in 0..<size {
             for column in 0..<size {
-                let slopeAcross = heights[row * size + (column + 1) % size] - heights[row * size + (column + size - 1) % size]
-                let slopeDown = heights[((row + 1) % size) * size + column] - heights[((row + size - 1) % size) * size + column]
-                let normal = simd_normalize(SIMD3<Float>(-slopeAcross * strength, slopeDown * strength, 1))
+                let value = UInt8.random(in: 0...255, using: &random)
                 let offset = row * bytesPerRow + column * 4
-                pixels[offset] = UInt8((normal.x * 0.5 + 0.5) * 255)
-                pixels[offset + 1] = UInt8((normal.y * 0.5 + 0.5) * 255)
-                pixels[offset + 2] = UInt8((normal.z * 0.5 + 0.5) * 255)
+                pixels[offset] = value
+                pixels[offset + 1] = value
+                pixels[offset + 2] = value
                 pixels[offset + 3] = 255
             }
         }
@@ -144,19 +149,33 @@ enum Textures {
     }
 
     @concurrent
-    static func backdrop() async -> CGImage {
-        let canvas = Canvas(width: 8, height: 1024)
+    static func floorFog() async -> CGImage {
+        let canvas = Canvas(width: 512, height: 512)
         let gradient = CGGradient(
             colorsSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
-            colors: [
-                CGColor(red: 0.07, green: 0.07, blue: 0.075, alpha: 1),
-                CGColor(red: 0.23, green: 0.23, blue: 0.24, alpha: 1),
-                CGColor(red: 0.30, green: 0.30, blue: 0.31, alpha: 1),
-                CGColor(red: 0.12, green: 0.12, blue: 0.125, alpha: 1),
-            ] as CFArray,
-            locations: [0, 0.42, 0.5, 0.62]
+            colors: [CGColor(gray: 1, alpha: 0), CGColor(gray: 1, alpha: 0), CGColor(gray: 1, alpha: 1)] as CFArray,
+            locations: [0, 0.4, 1]
         )!
-        canvas.context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 1024), end: CGPoint(x: 0, y: 0), options: [.drawsAfterEndLocation])
+        canvas.context.drawRadialGradient(gradient, startCenter: CGPoint(x: 256, y: 256), startRadius: 0, endCenter: CGPoint(x: 256, y: 256), endRadius: 256, options: [.drawsAfterEndLocation])
+        return canvas.image
+    }
+
+    @concurrent
+    static func scoreCard(_ number: Int) async -> CGImage {
+        let canvas = Canvas(width: 256, height: 320)
+        let context = canvas.context
+        context.setFillColor(red: 0.05, green: 0.05, blue: 0.05, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 256, height: 320))
+        context.setFillColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1)
+        context.fill(CGRect(x: 0, y: 158, width: 256, height: 4))
+        let text = NSAttributedString(string: "\(number)", attributes: [
+            .font: NSFont(name: "Futura-CondensedExtraBold", size: 230) ?? NSFont.boldSystemFont(ofSize: 230),
+            .foregroundColor: NSColor(red: 0.95, green: 0.93, blue: 0.86, alpha: 1),
+        ])
+        let line = CTLineCreateWithAttributedString(text)
+        let bounds = CTLineGetImageBounds(line, context)
+        context.textPosition = CGPoint(x: (256 - bounds.width) / 2 - bounds.minX, y: (320 - bounds.height) / 2 - bounds.minY)
+        CTLineDraw(line, context)
         return canvas.image
     }
 }

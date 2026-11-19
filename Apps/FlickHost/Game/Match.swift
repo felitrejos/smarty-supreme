@@ -320,7 +320,7 @@ final class Match {
 
     private func startCommentary() {
         let opponent = Side.allCases.first { controller(of: $0) == .computer }
-        referee.newGame(names: Dictionary(uniqueKeysWithValues: Side.allCases.map { ($0, name(of: $0)) }), opponent: opponent)
+        referee.newGame(names: Dictionary(uniqueKeysWithValues: Side.allCases.map { ($0, name(of: $0)) }), config: session.game.config, opponent: opponent)
     }
 
     private func addHold(_ reason: Hold) {
