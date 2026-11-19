@@ -9,6 +9,7 @@ public final class HostSession {
     public private(set) var game: GameState
     public private(set) var stage = MatchStage.lobby
     public private(set) var usesSideCamera = false
+    public private(set) var swingLatency: LatencyLog
 
     private let mode: MatchMode
     private let link: HostLink
@@ -40,6 +41,7 @@ public final class HostSession {
         self.clock = clock
         self.mode = mode
         self.config = config
+        swingLatency = LatencyLog(capacity: config.latencyHistory)
         game = GameState(seed: seed, config: gameConfig)
         let now = clock.now
         timeline = StepTimeline(step: 0, at: now, stepsPerSecond: gameConfig.stepsPerSecond)
@@ -104,6 +106,23 @@ public final class HostSession {
         }
     }
 
+    public func hold() {
+        if stage == .playing {
+            interrupt(.onHold)
+        }
+    }
+
+    public func releaseHold() {
+        switch stage {
+        case .interrupted(.onHold):
+            resumePlay()
+        case .interrupted(.phoneLost) where heldInterruption == .onHold:
+            heldInterruption = nil
+        default:
+            return
+        }
+    }
+
     public func resume() {
         guard case .interrupted(let interruption) = stage else { return }
         switch interruption {
@@ -114,7 +133,7 @@ public final class HostSession {
             reconnectDeadlines.removeAll()
         case .viewerLost:
             usesSideCamera = true
-        case .byHost, .byPlayer, .pointerLost, .serveTimeouts:
+        case .byHost, .onHold, .byPlayer, .pointerLost, .serveTimeouts:
             break
         }
         heldInterruption = nil
@@ -132,7 +151,7 @@ public final class HostSession {
             return []
         }
         if gap <= config.longestFrame {
-            queuePhoneSwings()
+            queuePhoneSwings(at: now)
         }
         pendingSwings += local.swings.filter { controller(of: $0.side) == .local }
         unsimulatedSeconds += Double(min(gap, config.longestFrame)) / 1_000_000
@@ -252,7 +271,7 @@ public final class HostSession {
             if input.viewerName != nil {
                 resumePlay()
             }
-        case .byHost, .byPlayer, .pointerLost, .serveTimeouts:
+        case .byHost, .onHold, .byPlayer, .pointerLost, .serveTimeouts:
             return
         }
     }
@@ -306,9 +325,12 @@ public final class HostSession {
         return side == .playerA ? position : 1 - position
     }
 
-    private func queuePhoneSwings() {
+    private func queuePhoneSwings(at now: Microseconds) {
         for side in Side.allCases where controller(of: side) == .phone {
             for swing in input.paddles[side]?.swings ?? [] {
+                if let peak = swing.macPeakTime {
+                    swingLatency.add(now - min(peak, now))
+                }
                 let step = swing.macPeakTime.map(timeline.step(at:)) ?? game.step
                 pendingSwings.append(Swing(side: side, step: step, strength: swing.strength, aim: 0))
             }

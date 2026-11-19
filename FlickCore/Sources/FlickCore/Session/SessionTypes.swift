@@ -9,6 +9,7 @@ public enum MatchMode: Equatable, Sendable {
 
 public enum Interruption: Equatable, Sendable {
     case byHost
+    case onHold
     case byPlayer(Side)
     case pointerLost(Side)
     case serveTimeouts(Side)
@@ -21,7 +22,7 @@ public enum Interruption: Equatable, Sendable {
             owner == side
         case .viewerLost(let continued):
             !continued.contains(side)
-        case .byHost, .phoneLost:
+        case .byHost, .onHold, .phoneLost:
             false
         }
     }
@@ -60,6 +61,7 @@ public struct SessionConfig: Sendable {
     public var roundTripWarning: Microseconds = 40_000
     public var roundTripLimit: Microseconds = 100_000
     public var longestFrame: Microseconds = 100_000
+    public var latencyHistory = 600
 
     public init() {}
 }

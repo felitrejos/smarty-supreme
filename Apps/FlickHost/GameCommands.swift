@@ -20,7 +20,7 @@ struct GameCommands: Commands {
         CommandMenu("Game") {
             Button(match.isPaused ? "Resume" : "Pause", action: match.togglePause)
                 .keyboardShortcut(.escape, modifiers: [])
-                .disabled(controller.isViewer || !match.hasStarted || match.isGameOver || match.isChoosingNewGame || match.isWaitingForADevice)
+                .disabled(controller.isViewer || !match.hasStarted || match.isGameOver || match.isHeld || match.isWaitingForADevice)
             Button("Swap Sides", action: match.swapSides)
                 .disabled(controller.isViewer || match.hasStarted)
         }

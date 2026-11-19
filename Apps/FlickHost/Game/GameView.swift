@@ -32,7 +32,7 @@ struct GameView: View {
                 stage.updates = content.subscribe(to: SceneEvents.Update.self) { event in
                     let events = match.advance()
                     scene.update(to: TablePose(game: match.game, events: events, dimmed: match.dimmed), elapsed: event.deltaTime)
-                    stats.record(event.deltaTime)
+                    stats.record(event.deltaTime) { match.session.swingLatency.percentile(0.95) }
                 }
             } catch {
                 stage.failure = "The table couldn’t be set up: \(error.localizedDescription)"
@@ -100,15 +100,29 @@ struct GameView: View {
                 match.releaseAllKeys()
             }
         }
-        .onChange(of: activeState) { _, state in
-            if state != .key {
-                match.releaseAllKeys()
-            }
+        .onChange(of: activeState, initial: true) { _, state in
+            match.appBecameActive(state != .inactive)
+        }
+        .onDisappear(perform: match.gameWindowClosed)
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification).receive(on: RunLoop.main)) { _ in
+            match.macWillSleep()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification).receive(on: RunLoop.main)) { _ in
+            match.macDidWake()
+        }
+        .onReceive(DistributedNotificationCenter.default().publisher(for: Self.screenLocked).receive(on: RunLoop.main)) { _ in
+            match.screenLocked()
+        }
+        .onReceive(DistributedNotificationCenter.default().publisher(for: Self.screenUnlocked).receive(on: RunLoop.main)) { _ in
+            match.screenUnlocked()
         }
         .onChange(of: match.camera) { _, camera in
             stage.scene?.show(camera, animated: true)
         }
     }
+
+    private static let screenLocked = Notification.Name("com.apple.screenIsLocked")
+    private static let screenUnlocked = Notification.Name("com.apple.screenIsUnlocked")
 
     private var showsCard: Bool {
         match.isPaused || match.isGameOver || !match.hasStarted
@@ -355,13 +369,20 @@ private struct FrameTimes: View {
     let stats: FrameStats
 
     var body: some View {
-        Text(text)
-            .font(.caption)
-            .monospacedDigit()
-            .foregroundStyle(meetsBudget ? Color.secondary : Color.orange)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .glassPanel(Capsule())
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(frameText)
+                .foregroundStyle(meetsBudget ? Color.secondary : Color.orange)
+            ResourceLine(stats: stats)
+            if let latency = stats.swingLatency95 {
+                Text(String(format: "Swings reach the game 95%% within %.0f ms, plus a frame to the screen", Double(latency) / 1_000))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .monospacedDigit()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .glassPanel(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var meetsBudget: Bool {
@@ -369,8 +390,23 @@ private struct FrameTimes: View {
         return percentile <= FrameStats.budget && stats.dropped == 0
     }
 
-    private var text: String {
+    private var frameText: String {
         guard let percentile = stats.percentile99 else { return "Measuring frames…" }
         return String(format: "99%% of frames under %.1f ms · %ld dropped · last %.0f s", percentile * 1_000, stats.dropped, stats.measured)
+    }
+}
+
+struct ResourceLine: View {
+    let stats: FrameStats
+
+    var body: some View {
+        if let cpu = stats.cpuShare {
+            Text(String(format: "CPU %.0f%% of a core · memory %.0f MB, %+.1f MB since the first frame", cpu * 100, Double(stats.memoryBytes) / 1_000_000, Double(stats.memoryGrowth) / 1_000_000))
+                .foregroundStyle(withinBudget(cpu) ? Color.secondary : Color.orange)
+        }
+    }
+
+    private func withinBudget(_ cpu: Double) -> Bool {
+        cpu <= FrameStats.cpuBudget && stats.memoryGrowth < FrameStats.memoryGrowthBudget
     }
 }

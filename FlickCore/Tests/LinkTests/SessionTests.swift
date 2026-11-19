@@ -140,6 +140,19 @@ struct TwoPlayerMatchTests {
         #expect(events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
     }
 
+    @Test func everyPhoneSwingRecordsHowLongItTookToReachTheGame() throws {
+        let harness = SessionHarness(mode: .twoPlayers, conditions: LinkConditions(latency: 20_000))
+        harness.addBot("Phone A", side: .playerA)
+        harness.addBot("Phone B", side: .playerB)
+        harness.run(for: 2_000_000)
+        harness.session.startNow()
+        harness.run(until: { $0.session.game.rally >= 6 })
+
+        let latency = try #require(harness.session.swingLatency.percentile(0.95))
+
+        #expect((20_000...20_000 + SessionHarness.frameMicroseconds).contains(latency))
+    }
+
     @Test func playerAsPhoneNeverMovesOrSwingsForPlayerB() {
         let harness = SessionHarness(mode: .twoPlayers)
         let phoneA = harness.addPhone("Phone A", holding: 0.5)
@@ -317,6 +330,67 @@ struct InterruptionOrderTests {
     }
 }
 
+struct HoldTests {
+    @Test func aHoldPausesTheMatchAndReleasingItResumes() {
+        let harness = SessionHarness(mode: .computer(.medium))
+        harness.run(for: 500_000)
+
+        harness.session.hold()
+        harness.run(for: 200_000)
+        #expect(harness.session.stage == .interrupted(.onHold))
+        #expect(harness.session.game.phase == .paused)
+
+        harness.session.releaseHold()
+        harness.run(for: 200_000)
+        #expect(harness.session.stage == .playing)
+    }
+
+    @Test func releasingAHoldNeverResumesAPauseSomeoneElseMade() {
+        let harness = SessionHarness(mode: .computer(.medium))
+        harness.run(for: 500_000)
+        harness.session.pause()
+
+        harness.session.hold()
+        harness.session.releaseHold()
+        harness.run(for: 200_000)
+
+        #expect(harness.session.stage == .interrupted(.byHost))
+    }
+
+    @Test func aHoldDoesNothingBeforeTheMatchStarts() {
+        let harness = SessionHarness(mode: .twoPlayers)
+        harness.run(for: 200_000)
+
+        harness.session.hold()
+
+        #expect(harness.session.stage == .lobby)
+    }
+
+    @Test func aHoldReleasedWhileAPhoneIsAwayResumesOnceThePhoneIsBack() {
+        let harness = SessionHarness(mode: .twoPlayers)
+        _ = harness.addPhone("Phone A", holding: 0.5)
+        _ = harness.addPhone("Phone B", holding: 0.5)
+        harness.run(for: 2_000_000)
+        harness.session.startNow()
+        harness.run(for: 500_000)
+        harness.session.hold()
+        harness.run(for: 200_000)
+
+        harness.link.network.disconnect(PeerID("Phone B"), LinkHarness.hostID)
+        harness.run(for: 500_000)
+        harness.session.releaseHold()
+        harness.run(for: 200_000)
+        guard case .interrupted(.phoneLost(.playerB, _)) = harness.session.stage else {
+            Issue.record("Expected the game to wait for Player B, got \(harness.session.stage)")
+            return
+        }
+        harness.link.network.connect(PeerID("Phone B"), LinkHarness.hostID)
+        harness.run(for: 500_000)
+
+        #expect(harness.session.stage == .playing)
+    }
+}
+
 struct ReconnectTests {
     @Test func aPhoneThatDropsMidRallyPausesAndResumesWithTheSameStateWithinThreeSecondsOfReconnecting() throws {
         let harness = SessionHarness(mode: .twoPlayers, conditions: LinkConditions(latency: 20_000))
@@ -459,6 +533,10 @@ final class SessionHarness {
         return phone
     }
 
+    func phone(_ name: String) -> PaddleLink {
+        phones[name]!
+    }
+
     func addViewer(_ name: String, ahead: Microseconds = 0) -> ViewerLink {
         let relay = EventRelay()
         let transport = link.network.join(as: PeerID(name), onEvent: relay.forward)
@@ -469,9 +547,9 @@ final class SessionHarness {
         return viewer
     }
 
-    func addBot(_ name: String, side: Side) {
+    func addBot(_ name: String, side: Side, missRate: Double = 0) {
         _ = addPhone(name, holding: 0.5)
-        bots[name] = PhoneBot(side: side)
+        bots[name] = PhoneBot(side: side, missRate: missRate)
     }
 
     @discardableResult
@@ -523,11 +601,15 @@ final class SessionHarness {
 
 struct PhoneBot {
     let side: Side
-    private var swungAtRally: Int?
+    private let missRate: Double
+    private var random: SplitMix64
+    private var lastShot: Int?
     private var servedFor: UInt64?
 
-    init(side: Side) {
+    init(side: Side, missRate: Double) {
         self.side = side
+        self.missRate = missRate
+        random = SplitMix64(seed: UInt64(side.rawValue) + 41)
     }
 
     mutating func play(_ game: GameState, phone: PaddleLink, now: Microseconds) {
@@ -543,9 +625,12 @@ struct PhoneBot {
             let zoneMiddle = face + (side == .playerA ? 1 : -1) * config.zoneDepth(forSpeed: game.ball.speed) / 2
             if let seconds = path.secondsUntil(y: zoneMiddle) {
                 target = config.position(ofPaddleX: path.position(after: seconds).x)
-                if seconds < SessionHarness.frameSeconds, swungAtRally != game.rally {
-                    swungAtRally = game.rally
-                    phone.sendSwing(swing(at: now + Microseconds(seconds * 1_000_000)))
+                let shot = (game.score.a + game.score.b) * 1_000 + game.rally
+                if seconds < SessionHarness.frameSeconds, lastShot != shot {
+                    lastShot = shot
+                    if Double.random(in: 0..<1, using: &random) >= missRate {
+                        phone.sendSwing(swing(at: now + Microseconds(seconds * 1_000_000)))
+                    }
                 }
             }
         default:

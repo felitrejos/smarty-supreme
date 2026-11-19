@@ -50,14 +50,17 @@ struct ViewerView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if showsFrameTimes {
-                Text(delayText)
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .glassPanel(Capsule())
-                    .padding(16)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(delayText)
+                        .foregroundStyle(.secondary)
+                    ResourceLine(stats: stats)
+                }
+                .font(.caption)
+                .monospacedDigit()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .glassPanel(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(16)
             }
         }
         .navigationTitle("Flick Pong")

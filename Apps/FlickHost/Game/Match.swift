@@ -82,6 +82,13 @@ final class Match {
         case right
     }
 
+    private enum Hold {
+        case choosingNewGame
+        case appInBackground
+        case asleep
+        case screenLocked
+    }
+
     private enum Key {
         case move(Side, Direction)
         case swing(Side)
@@ -112,7 +119,7 @@ final class Match {
     @ObservationIgnored private var heldA: Set<Direction> = []
     @ObservationIgnored private var heldB: Set<Direction> = []
     @ObservationIgnored private var pendingSwings: [Swing] = []
-    @ObservationIgnored private var pausedForNewGame = false
+    private var holds: Set<Hold> = []
 
     init(link: HostLink, clock: any MonotonicClock, defaults: UserDefaults) {
         self.link = link
@@ -174,6 +181,9 @@ final class Match {
         pendingSwings.removeAll()
         let wasWaiting = !hasStarted
         let events = session.advance(local: local)
+        if isHeld {
+            session.hold()
+        }
         if events.contains(where: { if case .served = $0 { true } else { false } }) {
             controlsRequested = false
         }
@@ -202,27 +212,52 @@ final class Match {
         return .handled
     }
 
+    var isHeld: Bool {
+        !holds.isEmpty
+    }
+
     func chooseNewGame() {
-        if stage == .playing {
-            session.pause()
-            pausedForNewGame = true
-            publish()
-        }
+        addHold(.choosingNewGame)
         isChoosingNewGame = true
     }
 
     func cancelNewGame() {
         isChoosingNewGame = false
-        if pausedForNewGame, stage == .interrupted(.byHost) {
-            session.resume()
-            publish()
+        removeHold(.choosingNewGame)
+    }
+
+    func appBecameActive(_ isActive: Bool) {
+        if isActive {
+            removeHold(.appInBackground)
+        } else {
+            releaseAllKeys()
+            addHold(.appInBackground)
         }
-        pausedForNewGame = false
+    }
+
+    func gameWindowClosed() {
+        removeHold(.appInBackground)
+    }
+
+    func macWillSleep() {
+        addHold(.asleep)
+    }
+
+    func macDidWake() {
+        removeHold(.asleep)
+    }
+
+    func screenLocked() {
+        addHold(.screenLocked)
+    }
+
+    func screenUnlocked() {
+        removeHold(.screenLocked)
     }
 
     func start(_ newSetup: MatchSetup) {
         isChoosingNewGame = false
-        pausedForNewGame = false
+        holds.remove(.choosingNewGame)
         newSetup.save(in: defaults)
         setup = newSetup
         playAgain()
@@ -276,6 +311,19 @@ final class Match {
     func releaseAllKeys() {
         heldA.removeAll()
         heldB.removeAll()
+    }
+
+    private func addHold(_ reason: Hold) {
+        holds.insert(reason)
+        session.hold()
+        publish()
+    }
+
+    private func removeHold(_ reason: Hold) {
+        holds.remove(reason)
+        guard holds.isEmpty else { return }
+        session.releaseHold()
+        publish()
     }
 
     private func publish() {

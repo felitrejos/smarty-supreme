@@ -144,7 +144,7 @@ struct InterruptionCard: View {
 
     private var title: String {
         switch interruption {
-        case .byHost: "Paused"
+        case .byHost, .onHold: "Paused"
         case .byPlayer(let side): "\(side.playerName) paused"
         case .pointerLost(let side): "\(side.playerName)’s paddle stopped"
         case .serveTimeouts(let side): "Is \(side.playerName) still playing?"
@@ -157,6 +157,8 @@ struct InterruptionCard: View {
         switch interruption {
         case .byHost:
             "Resume when you’re ready."
+        case .onHold:
+            "Play resumes when you come back to Flick Pong."
         case .byPlayer(let side):
             "\(side.playerName) can resume from their iPhone, or you can resume here."
         case .pointerLost(let side):
@@ -177,7 +179,7 @@ struct InterruptionCard: View {
             Button("Play On With the Keyboard", action: match.playOnWithoutTheMissingDevice)
         case .viewerLost:
             Button("Switch to the Side View", action: match.playOnWithoutTheMissingDevice)
-        case .byHost, .byPlayer, .pointerLost, .serveTimeouts:
+        case .byHost, .onHold, .byPlayer, .pointerLost, .serveTimeouts:
             Button("Resume", action: match.togglePause)
                 .keyboardShortcut(.defaultAction)
         }

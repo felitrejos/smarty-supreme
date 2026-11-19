@@ -5,29 +5,41 @@ struct PaddleView: View {
     let controller: PaddleController
     let isMotionAvailable: Bool
 
+    @State private var thermalState = ProcessInfo.processInfo.thermalState
+
     var body: some View {
         NavigationStack {
-            TimelineView(.animation) { _ in
+            TimelineView(.animation(minimumInterval: isHot ? Self.hotFrameInterval : nil)) { _ in
                 content(controller.sensing.snapshot)
             }
             .navigationTitle("Flick Paddle")
         }
+        .defersSystemGestures(on: .bottom)
+        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification).receive(on: RunLoop.main)) { _ in
+            thermalState = ProcessInfo.processInfo.thermalState
+        }
+    }
+
+    private static let hotFrameInterval: TimeInterval = 0.1
+
+    private var isHot: Bool {
+        thermalState == .serious || thermalState == .critical
     }
 
     private func content(_ snapshot: PaddleSensing.Snapshot) -> some View {
         VStack(spacing: 24) {
             LinkHeader(link: controller.link, launchedAt: controller.launchedAt, networkFailure: controller.networkFailure.latest)
+            if isHot {
+                Label("Your iPhone is hot. Play continues at full speed; the screen updates less often.", systemImage: "thermometer.high")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if let state = controller.link.gameState {
                 MatchPanel(state: state, controller: controller)
             }
+            playArea(snapshot)
             if isMotionAvailable {
-                Text(status(snapshot))
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                PaddleTrack(reading: snapshot.reading)
-                SwingPanel(snapshot: snapshot)
-                Spacer()
                 Picker("Sensitivity", selection: Binding(get: { snapshot.sensitivity }, set: controller.setSensitivity)) {
                     ForEach(Sensitivity.allCases, id: \.self) { sensitivity in
                         Text("\(Int(sensitivity.rangeDegrees))°").tag(sensitivity)
@@ -41,17 +53,50 @@ struct PaddleView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .disabled(snapshot.calibration == .inProgress)
-            } else {
-                ContentUnavailableView(
-                    "Motion sensors unavailable",
-                    systemImage: "iphone.slash",
-                    description: Text("Run the paddle on an iPhone to swing and tilt.")
-                )
             }
         }
         .padding()
+        .safeAreaInset(edge: .bottom) {
+            StatsFooter(stats: controller.stats)
+        }
+    }
+
+    @ViewBuilder
+    private func playArea(_ snapshot: PaddleSensing.Snapshot) -> some View {
+        let area = VStack(spacing: 24) {
+            if isMotionAvailable {
+                Text(status(snapshot))
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                PaddleTrack(reading: snapshot.reading)
+                SwingPanel(snapshot: snapshot)
+            } else {
+                Text("No motion sensors here. Drag along the bar to move, and swipe up here to swing.")
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                GeometryReader { geometry in
+                    PaddleTrack(reading: snapshot.reading)
+                        .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                            controller.dragPaddle(to: drag.location.x, across: geometry.size.width)
+                        })
+                }
+                .frame(height: 44)
+            }
+            Spacer()
+        }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2, perform: controller.sensing.calibrate)
+        .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { drag in
+            if TouchInput.isSwing(across: drag.translation.width, down: drag.translation.height) {
+                controller.swipeSwing()
+            }
+        })
+        if isMotionAvailable {
+            area.onTapGesture(count: 2, perform: controller.sensing.calibrate)
+        } else {
+            area
+        }
     }
 
     private func status(_ snapshot: PaddleSensing.Snapshot) -> String {
@@ -82,6 +127,12 @@ private struct MatchPanel: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            if state.connectionIsSlow {
+                Label("Slow connection. Turn on Wi‑Fi on both devices and keep them near the router.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             HStack(spacing: 8) {
                 Capsule()
                     .fill(state.side.rubberColor)
@@ -110,21 +161,13 @@ private struct MatchPanel: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .lobby:
-            VStack(spacing: 8) {
-                if state.connectionIsSlow {
-                    slowConnection
-                }
-                wideButton("Ready", prominent: true) { controller.link.setReady(true) }
-            }
+            wideButton("Ready", prominent: true) { controller.link.setReady(true) }
         case .ready:
             VStack(spacing: 8) {
                 Label("Ready. The match starts when both players are.", systemImage: "checkmark.circle.fill")
                     .font(.footnote)
                     .foregroundStyle(.green)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if state.connectionIsSlow {
-                    slowConnection
-                }
                 wideButton("Not Ready", prominent: false) { controller.link.setReady(false) }
             }
         case .serving, .rally, .pointScored:
@@ -143,13 +186,6 @@ private struct MatchPanel: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private var slowConnection: some View {
-        Label("Slow connection. Move closer to the Wi‑Fi router.", systemImage: "exclamationmark.triangle.fill")
-            .font(.footnote)
-            .foregroundStyle(.orange)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var showsScore: Bool {
@@ -174,6 +210,24 @@ private struct MatchPanel: View {
                 .buttonStyle(.bordered)
                 .controlSize(.large)
         }
+    }
+}
+
+private struct StatsFooter: View {
+    let stats: DeviceStats
+
+    var body: some View {
+        if let cpu = stats.cpuShare {
+            Text(text(cpu: cpu))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(stats.isWithinBudget(cpu: cpu) ? Color.secondary : Color.orange)
+        }
+    }
+
+    private func text(cpu: Double) -> String {
+        let cpuText = String(format: "CPU %.0f%% of a core", cpu * 100)
+        guard let drop = stats.batteryDrop else { return cpuText }
+        return cpuText + String(format: " · battery −%.0f%% in %.0f min unplugged", drop * 100, stats.batteryMinutes)
     }
 }
 

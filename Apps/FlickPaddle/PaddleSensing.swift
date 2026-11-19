@@ -70,6 +70,17 @@ final class PaddleSensing: Sendable {
         }
     }
 
+    func recordTouchSwing(_ swing: SwingEvent) {
+        state.withLock { state in
+            state.swings += 1
+            state.lastSwing = swing
+        }
+    }
+
+    func setTouchPosition(_ position: Double) {
+        state.withLock { $0.reading = .position(position) }
+    }
+
     func setSensitivity(_ sensitivity: Sensitivity) -> Bool {
         state.withLock { state in
             state.sensitivity = sensitivity

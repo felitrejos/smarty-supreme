@@ -7,12 +7,14 @@ final class PaddleController {
     private static let pointerInterval = DispatchTimeInterval.microseconds(16_667)
     private static let byeDelivery = DispatchTimeInterval.milliseconds(300)
     private static let longestName = 40
+    private static let touchStartPosition = 0.5
 
     let sensing = PaddleSensing()
     let link: PaddleLink
     let launchedAt: Microseconds
     let networkFailure = NetworkFailure()
     let haptics = HapticPlayer()
+    let stats = DeviceStats()
 
     private let motion: MotionService
     private let transport: MultipeerTransport
@@ -48,9 +50,13 @@ final class PaddleController {
         transport.start()
         if motion.isAvailable {
             motion.start(onSample: forwardSample, onError: sensing.reportSensorError)
+        } else {
+            sensing.setTouchPosition(Self.touchStartPosition)
+            link.announceCalibration(sensing.snapshot.sensitivity)
         }
         pointerTimer = makePointerTimer()
         haptics.prepare()
+        stats.start()
         UIApplication.shared.isIdleTimerDisabled = true
     }
 
@@ -60,6 +66,16 @@ final class PaddleController {
         let disconnect = DispatchWorkItem { [transport] in transport.stop() }
         pendingDisconnect = disconnect
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.byeDelivery, execute: disconnect)
+    }
+
+    func swipeSwing() {
+        let swing = TouchInput.swing(at: SystemClock().now)
+        sensing.recordTouchSwing(swing)
+        link.sendSwing(swing)
+    }
+
+    func dragPaddle(to x: Double, across width: Double) {
+        sensing.setTouchPosition(TouchInput.position(x: x, width: width))
     }
 
     func setSensitivity(_ sensitivity: Sensitivity) {
