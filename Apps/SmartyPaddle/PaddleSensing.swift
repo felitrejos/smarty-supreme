@@ -19,8 +19,6 @@ final class PaddleSensing: Sendable {
         let touchPosition: Double?
         let swings: Int
         let lastSwing: SwingEvent?
-        let lastDropAt: Microseconds?
-        let latestSampleAt: Microseconds?
         let sensorError: String?
     }
 
@@ -32,8 +30,6 @@ final class PaddleSensing: Sendable {
         var touchPosition: Double?
         var swings = 0
         var lastSwing: SwingEvent?
-        var lastDropAt: Microseconds?
-        var latestSampleAt: Microseconds?
         var sensorError: String?
     }
 
@@ -46,8 +42,6 @@ final class PaddleSensing: Sendable {
                 touchPosition: state.touchPosition,
                 swings: state.swings,
                 lastSwing: state.lastSwing,
-                lastDropAt: state.lastDropAt,
-                latestSampleAt: state.latestSampleAt,
                 sensorError: state.sensorError
             )
         }
@@ -80,14 +74,11 @@ final class PaddleSensing: Sendable {
     func process(_ sample: MotionSample) -> Outcome {
         state.withLock { state in
             var outcome = Outcome()
-            state.latestSampleAt = sample.time
             switch state.detector.process(sample) {
             case .swing(let swing):
                 state.swings += 1
                 state.lastSwing = swing
-            case .drop:
-                state.lastDropAt = sample.time
-            case nil:
+            case .drop, nil:
                 break
             }
             if var calibrator = state.calibrator {

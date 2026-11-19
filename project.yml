@@ -32,22 +32,6 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
     scheme: {}
-  SmartyRecorder:
-    type: application
-    platform: iOS
-    sources: [Apps/SmartyRecorder, Apps/Shared]
-    dependencies:
-      - package: SmartyCore
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.smartysupreme.recorder
-        INFOPLIST_KEY_CFBundleDisplayName: Smarty Recorder
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
-        INFOPLIST_FILE: Apps/SmartyRecorder/Info.plist
-        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
-        TARGETED_DEVICE_FAMILY: "1"
-    scheme: {}
   SmartyHost:
     type: application
     platform: macOS

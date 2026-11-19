@@ -59,7 +59,7 @@ Phone players move automatically, as in Wii Sports Resort: the body heads for wh
 
 ## Phone as the bat
 
-- **Hold:** like a bat handle, bottom of the phone in the palm, screen facing the Mac as the forehand face.
+- **Hold:** like a bat handle, bottom of the phone in the palm, screen facing you. The back of the phone is the forehand face, pointing at the Mac.
 - **Calibrate:** hold still in that pose and tap Calibrate. That attitude becomes upright, facing the table.
 - **Sensing:** `CMDeviceMotion` at 100 Hz (`xArbitraryZVertical`). Bat orientation is the attitude relative to calibration. Blade velocity is `ω × (R·r_blade)` plus the leaky integral of user acceleration (τ 0.15 s), with `r_blade` 0.25 m up the handle.
 - **Link:** each sample (timestamp, orientation quaternion, blade velocity) goes to the Mac over the unreliable channel, timed with the existing clock sync. Haptics stay: a contact buzz scaled by bat speed.

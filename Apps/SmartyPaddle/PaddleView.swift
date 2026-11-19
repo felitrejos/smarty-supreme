@@ -25,124 +25,156 @@ struct PaddleView: View {
         thermalState == .serious || thermalState == .critical
     }
 
-    private var side: Side {
-        controller.link.gameState?.side ?? .playerA
+    private var state: GameStateUpdate? {
+        controller.link.gameState
+    }
+
+    private var isPaired: Bool {
+        if case .paired = controller.link.status { true } else { false }
     }
 
     private func content(_ snapshot: PaddleSensing.Snapshot) -> some View {
-        VStack(spacing: 0) {
-            PaddleFace(side: side, tilt: tilt(snapshot), swings: snapshot.swings) {
-                VStack(spacing: 14) {
-                    Stamp()
-                    LinkHeader(link: controller.link, launchedAt: controller.launchedAt, networkFailure: controller.networkFailure.latest)
-                    if isHot {
-                        Text("Your iPhone is hot. The screen updates less often; play is unaffected.")
-                            .font(Paddle.Typeface.note)
-                            .foregroundStyle(Paddle.Tone.warning)
-                            .multilineTextAlignment(.center)
-                    }
-                    if let state = controller.link.gameState {
-                        MatchPanel(state: state, controller: controller)
-                    }
-                    Spacer(minLength: 0)
-                    playArea(snapshot)
-                }
-                .padding(.horizontal, 30)
-                .padding(.top, 34)
-                .padding(.bottom, 28)
+        RubberFace(side: state?.side ?? .playerA, swings: snapshot.swings) {
+            VStack(spacing: 0) {
+                Text(state.map { $0.side.playerName.uppercased() } ?? "SMARTY SUPREME")
+                    .font(Paddle.Typeface.label)
+                    .tracking(3)
+                    .foregroundStyle(Paddle.Tone.cream.opacity(0.75))
+                Spacer(minLength: 0)
+                centre(snapshot)
+                Spacer(minLength: 0)
+                footer(snapshot)
+                    .frame(minHeight: 56)
             }
-            Handle {
-                if isMotionAvailable {
-                    Button(action: controller.sensing.calibrate) {
-                        Text(snapshot.calibration == .inProgress ? "HOLD STILL" : "CALIBRATE")
-                            .font(Paddle.Typeface.handle)
-                            .tracking(2)
-                            .foregroundStyle(Paddle.Tone.ink)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity)
-                            .contentShape(Rectangle())
-                    }
-                    .disabled(snapshot.calibration == .inProgress)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                if isMotionAvailable, snapshot.calibration == .calibrated {
+                    controller.sensing.calibrate()
                 }
             }
+            .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { drag in
+                if !isMotionAvailable, TouchInput.isSwing(across: drag.translation.width, down: drag.translation.height) {
+                    controller.swipeSwing()
+                }
+            })
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-    }
-
-    private func tilt(_ snapshot: PaddleSensing.Snapshot) -> Double {
-        guard let position = snapshot.touchPosition else { return 0 }
-        return (position - 0.5) * Paddle.maximumTilt * 2
+        .padding(10)
     }
 
     @ViewBuilder
-    private func playArea(_ snapshot: PaddleSensing.Snapshot) -> some View {
-        let area = VStack(spacing: 14) {
-            Text(isMotionAvailable ? status(snapshot) : "Drag along the groove to move, swipe up to swing.")
-                .font(Paddle.Typeface.body)
-                .foregroundStyle(Paddle.Tone.cream)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, minHeight: 44)
-            if !isMotionAvailable {
-                GeometryReader { geometry in
-                    Groove(position: snapshot.touchPosition)
-                        .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
-                            controller.dragPaddle(to: drag.location.x, across: geometry.size.width)
-                        })
-                }
-                .frame(height: Paddle.grooveHeight)
-            }
-            if let swing = snapshot.lastSwing {
-                Text("\(snapshot.swings) \(snapshot.swings == 1 ? "SWING" : "SWINGS") · LAST \(Int(swing.strength * 100))%")
-                    .font(Paddle.Typeface.small)
-                    .tracking(1.5)
-                    .foregroundStyle(Paddle.Tone.cream.opacity(0.7))
-            }
-        }
-        .contentShape(Rectangle())
-        .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { drag in
-            if TouchInput.isSwing(across: drag.translation.width, down: drag.translation.height) {
-                controller.swipeSwing()
-            }
-        })
-        if isMotionAvailable {
-            area.onTapGesture(count: 2, perform: controller.sensing.calibrate)
-        } else {
-            area
+    private func centre(_ snapshot: PaddleSensing.Snapshot) -> some View {
+        if let error = snapshot.sensorError {
+            Message(title: "SENSOR ERROR", detail: error)
+        } else if !isPaired {
+            connection
+        } else if isMotionAvailable, snapshot.calibration != .calibrated {
+            calibration(snapshot.calibration)
+        } else if let state {
+            match(state, snapshot: snapshot)
         }
     }
 
-    private func status(_ snapshot: PaddleSensing.Snapshot) -> String {
-        if let error = snapshot.sensorError {
-            return "Sensor error: \(error)"
+    private var connection: some View {
+        let failure = controller.networkFailure.latest
+        return switch controller.link.status {
+        case .searching:
+            Message(title: "LOOKING FOR YOUR MAC", detail: failure.map { _ in "Allow Local Network for Smarty Paddle in Settings." } ?? "Open Smarty Supreme on the same Wi‑Fi.")
+        case .handshaking:
+            Message(title: "CONNECTING", detail: nil)
+        case .refused(.versionMismatch):
+            Message(title: "UPDATE NEEDED", detail: "Update Smarty Supreme on both devices.")
+        case .refused(.gameFull):
+            Message(title: "GAME FULL", detail: "You’ll join when a place frees up.")
+        case .refused, .paired:
+            Message(title: "DISCONNECTED", detail: nil)
         }
-        if let drop = snapshot.lastDropAt, let now = snapshot.latestSampleAt, now - drop < 1_500_000 {
-            return "Hold on tight"
+    }
+
+    private func calibration(_ status: PaddleSensing.CalibrationStatus) -> some View {
+        VStack(spacing: 28) {
+            switch status {
+            case .inProgress:
+                Message(title: "HOLD STILL", detail: nil)
+            case .failed(.handMoved):
+                Message(title: "HOLD IT LIKE A BAT", detail: "Your hand moved. Try again.")
+            case .failed(.notUpright):
+                Message(title: "HOLD IT LIKE A BAT", detail: "Top pointing up. Try again.")
+            case .needed, .calibrated:
+                Message(title: "HOLD IT LIKE A BAT", detail: "Screen toward you, top up.")
+            }
+            PrimaryButton(title: "CALIBRATE", action: controller.sensing.calibrate)
+                .disabled(status == .inProgress)
+                .opacity(status == .inProgress ? 0.4 : 1)
         }
-        switch snapshot.calibration {
-        case .needed:
-            return "Hold the phone like a bat: bottom in your palm, top pointing up, screen facing the Mac. Then tap Calibrate."
-        case .inProgress:
-            return "Hold still…"
-        case .failed(.handMoved):
-            return "Your hand moved. Hold still and try again."
-        case .failed(.notUpright):
-            return "Hold the phone upright and try again."
-        case .calibrated:
-            return "Swing it like a bat. Angle the face to place it, brush up for topspin. Double-tap to recalibrate."
+    }
+
+    @ViewBuilder
+    private func match(_ state: GameStateUpdate, snapshot: PaddleSensing.Snapshot) -> some View {
+        switch state.phase {
+        case .calibrating, .lobby:
+            PrimaryButton(title: "READY") { controller.link.setReady(true) }
+        case .ready:
+            Message(title: "READY", detail: "Starting when both players are.")
+        case .serving, .rally, .pointScored:
+            Score(state: state)
+        case .paused:
+            VStack(spacing: 28) {
+                Message(title: "PAUSED", detail: state.canResume ? nil : "Waiting for the other player.")
+                if state.canResume {
+                    PrimaryButton(title: "CONTINUE") { controller.link.requestPause(false) }
+                }
+            }
+        case .gameOver:
+            VStack(spacing: 12) {
+                Message(title: state.winner == state.side ? "YOU WON" : "YOU LOST", detail: nil)
+                Score(state: state)
+            }
+        }
+        if !isMotionAvailable {
+            GeometryReader { geometry in
+                Groove(position: snapshot.touchPosition)
+                    .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                        controller.dragPaddle(to: drag.location.x, across: geometry.size.width)
+                    })
+            }
+            .frame(height: Paddle.grooveHeight)
+            .padding(.top, 32)
+        }
+    }
+
+    @ViewBuilder
+    private func footer(_ snapshot: PaddleSensing.Snapshot) -> some View {
+        if state?.connectionIsSlow == true {
+            Hint("Slow connection. Move closer to the router.", tone: Paddle.Tone.warning)
+        } else if isHot {
+            Hint("Your iPhone is hot. Play is unaffected.", tone: Paddle.Tone.warning)
+        } else if let state, isPaired, !isMotionAvailable || snapshot.calibration == .calibrated {
+            switch state.phase {
+            case .serving, .rally, .pointScored:
+                QuietButton(title: "PAUSE") { controller.link.requestPause(true) }
+            case .ready:
+                QuietButton(title: "NOT READY") { controller.link.setReady(false) }
+            case .calibrating, .lobby:
+                if isMotionAvailable, snapshot.calibration == .calibrated {
+                    Hint("Double-tap to recalibrate", tone: Paddle.Tone.cream.opacity(0.6))
+                }
+            case .paused, .gameOver:
+                EmptyView()
+            }
         }
     }
 }
 
 enum Paddle {
-    static let maximumTilt = 7.0
     static let grooveHeight: CGFloat = 26
     static let rim: CGFloat = 9
 
     enum Tone {
         static let backdrop = Color(red: 0.05, green: 0.04, blue: 0.035)
         static let cream = Color(red: 0.95, green: 0.91, blue: 0.82)
-        static let gold = Color(red: 0.86, green: 0.71, blue: 0.42)
         static let ink = Color(red: 0.13, green: 0.08, blue: 0.05)
         static let warning = Color(red: 1, green: 0.72, blue: 0.4)
         static let woodLight = Color(red: 0.78, green: 0.58, blue: 0.38)
@@ -150,50 +182,36 @@ enum Paddle {
     }
 
     enum Typeface {
-        static let stamp = Font.custom("Futura-CondensedExtraBold", size: 30)
-        static let score = Font.custom("Futura-CondensedExtraBold", size: 64)
-        static let title = Font.custom("Futura-Bold", size: 17)
-        static let body = Font.custom("Futura-Medium", size: 16)
-        static let note = Font.custom("Futura-Medium", size: 13)
-        static let small = Font.custom("Futura-Bold", size: 11)
-        static let handle = Font.custom("Futura-Bold", size: 14)
-    }
-
-    static func rubber(_ side: Side) -> Color {
-        side.rubberColor
+        static let score = Font.custom("Futura-CondensedExtraBold", size: 96)
+        static let title = Font.custom("Futura-Bold", size: 24)
+        static let detail = Font.custom("Futura-Medium", size: 16)
+        static let label = Font.custom("Futura-Bold", size: 12)
+        static let button = Font.custom("Futura-Bold", size: 17)
     }
 }
 
-private struct PaddleFace<Content: View>: View {
+private struct RubberFace<Content: View>: View {
     let side: Side
-    let tilt: Double
     let swings: Int
     @ViewBuilder let content: Content
 
     @State private var flash = 0.0
-    @State private var pulse = 1.0
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 150, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 56, style: .continuous)
         ZStack {
             shape.fill(LinearGradient(colors: [Paddle.Tone.woodLight, Paddle.Tone.woodDark], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Pips(color: Paddle.rubber(side))
+            Pips(color: side.rubberColor)
                 .clipShape(shape.inset(by: Paddle.rim))
-                .overlay(shape.inset(by: Paddle.rim).strokeBorder(.black.opacity(0.45), lineWidth: 1.5))
             shape.inset(by: Paddle.rim)
-                .fill(RadialGradient(colors: [.white.opacity(0.14), .clear], center: .init(x: 0.35, y: 0.2), startRadius: 0, endRadius: 420))
+                .fill(LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.45)], startPoint: .top, endPoint: .bottom))
             shape.inset(by: Paddle.rim).fill(.white.opacity(flash))
             content
         }
-        .scaleEffect(pulse)
-        .rotation3DEffect(.degrees(tilt), axis: (x: 0, y: 0, z: 1), anchor: .bottom)
-        .shadow(color: .black.opacity(0.6), radius: 18, y: 10)
         .onChange(of: swings) {
-            flash = 0.28
-            pulse = 1.035
-            withAnimation(.easeOut(duration: 0.35)) {
+            flash = 0.2
+            withAnimation(.easeOut(duration: 0.3)) {
                 flash = 0
-                pulse = 1
             }
         }
     }
@@ -215,7 +233,7 @@ private struct Pips: View {
                     let pip = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
                     context.fill(Path(ellipseIn: pip.offsetBy(dx: 0.6, dy: 0.8)), with: .color(.black.opacity(0.35)))
                     context.fill(Path(ellipseIn: pip), with: .color(color))
-                    context.fill(Path(ellipseIn: pip.insetBy(dx: 1.1, dy: 1.1).offsetBy(dx: -0.5, dy: -0.6)), with: .color(.white.opacity(0.12)))
+                    context.fill(Path(ellipseIn: pip.insetBy(dx: 1.1, dy: 1.1).offsetBy(dx: -0.5, dy: -0.6)), with: .color(.white.opacity(0.1)))
                     x += spacing
                 }
                 y += spacing * 0.866
@@ -227,184 +245,99 @@ private struct Pips: View {
     }
 }
 
-private struct Handle<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        ZStack {
-            UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 30, bottomTrailingRadius: 30, topTrailingRadius: 6, style: .continuous)
-                .fill(LinearGradient(colors: [Paddle.Tone.woodDark, Paddle.Tone.woodLight, Paddle.Tone.woodDark], startPoint: .leading, endPoint: .trailing))
-            content
-        }
-        .frame(width: 150, height: 74)
-    }
-}
-
-private struct Stamp: View {
-    var body: some View {
-        VStack(spacing: 2) {
-            Text("SMARTY SUPREME")
-                .font(Paddle.Typeface.stamp)
-                .tracking(3)
-            Text("HARDBAT · TOURNAMENT")
-                .font(Paddle.Typeface.small)
-                .tracking(3)
-        }
-        .foregroundStyle(Paddle.Tone.gold)
-        .shadow(color: .black.opacity(0.4), radius: 0, x: 0, y: 1)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Smarty Supreme")
-    }
-}
-
-private struct MatchPanel: View {
-    let state: GameStateUpdate
-    let controller: PaddleController
+private struct Message: View {
+    let title: String
+    let detail: String?
 
     var body: some View {
         VStack(spacing: 10) {
-            if state.connectionIsSlow {
-                Text("Slow connection. Turn on Wi‑Fi on both devices and keep them near the router.")
-                    .font(Paddle.Typeface.note)
-                    .foregroundStyle(Paddle.Tone.warning)
-                    .multilineTextAlignment(.center)
-            }
-            Text("YOU’RE \(state.side.playerName.uppercased())")
-                .font(Paddle.Typeface.small)
-                .tracking(2)
-                .foregroundStyle(Paddle.Tone.cream.opacity(0.8))
-            if showsScore {
-                HStack(spacing: 18) {
-                    Text("\(score(of: state.side))")
-                    Text("–").foregroundStyle(Paddle.Tone.cream.opacity(0.5))
-                    Text("\(score(of: state.side.opponent))")
-                }
-                .font(Paddle.Typeface.score)
-                .monospacedDigit()
-                .foregroundStyle(Paddle.Tone.cream)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("You \(score(of: state.side)), opponent \(score(of: state.side.opponent))")
-            }
-            action
-        }
-    }
-
-    @ViewBuilder
-    private var action: some View {
-        switch state.phase {
-        case .calibrating:
-            note("Calibrate below, then tap Ready.")
-        case .lobby:
-            StampedButton(title: "READY", prominent: true) { controller.link.setReady(true) }
-        case .ready:
-            VStack(spacing: 8) {
-                note("Ready. The match starts when both players are.")
-                StampedButton(title: "NOT READY", prominent: false) { controller.link.setReady(false) }
-            }
-        case .serving, .rally, .pointScored:
-            StampedButton(title: "PAUSE", prominent: false) { controller.link.requestPause(true) }
-        case .paused:
-            if state.canResume {
-                StampedButton(title: "CONTINUE", prominent: true) { controller.link.requestPause(false) }
-            } else {
-                note("Paused. Waiting for the other player or the Mac.")
-            }
-        case .gameOver:
-            Text(state.winner == state.side ? "YOU WON" : "YOU LOST")
+            Text(title)
                 .font(Paddle.Typeface.title)
                 .tracking(2)
-                .foregroundStyle(Paddle.Tone.gold)
+                .foregroundStyle(Paddle.Tone.cream)
+            if let detail {
+                Text(detail)
+                    .font(Paddle.Typeface.detail)
+                    .foregroundStyle(Paddle.Tone.cream.opacity(0.75))
+            }
         }
-    }
-
-    private var showsScore: Bool {
-        switch state.phase {
-        case .calibrating, .lobby, .ready: false
-        case .serving, .rally, .pointScored, .paused, .gameOver: true
-        }
-    }
-
-    private func score(of side: Side) -> Int {
-        Int(side == .playerA ? state.scoreA : state.scoreB)
-    }
-
-    private func note(_ text: String) -> some View {
-        Text(text)
-            .font(Paddle.Typeface.note)
-            .foregroundStyle(Paddle.Tone.cream.opacity(0.8))
-            .multilineTextAlignment(.center)
+        .multilineTextAlignment(.center)
+        .shadow(color: .black.opacity(0.5), radius: 6)
+        .accessibilityElement(children: .combine)
     }
 }
 
-private struct StampedButton: View {
+private struct Score: View {
+    let state: GameStateUpdate
+
+    var body: some View {
+        let mine = Int(state.side == .playerA ? state.scoreA : state.scoreB)
+        let theirs = Int(state.side == .playerA ? state.scoreB : state.scoreA)
+        HStack(spacing: 20) {
+            Text("\(mine)")
+            Text("–").foregroundStyle(Paddle.Tone.cream.opacity(0.4))
+            Text("\(theirs)")
+        }
+        .font(Paddle.Typeface.score)
+        .monospacedDigit()
+        .foregroundStyle(Paddle.Tone.cream)
+        .shadow(color: .black.opacity(0.5), radius: 8)
+        .contentTransition(.numericText())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("You \(mine), opponent \(theirs)")
+    }
+}
+
+private struct PrimaryButton: View {
     let title: String
-    let prominent: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(Paddle.Typeface.title)
+                .font(Paddle.Typeface.button)
                 .tracking(2)
-                .foregroundStyle(prominent ? Paddle.Tone.ink : Paddle.Tone.cream)
-                .frame(maxWidth: 220, minHeight: 48)
-                .background(prominent ? Paddle.Tone.cream : .clear, in: Capsule())
-                .overlay(Capsule().strokeBorder(Paddle.Tone.cream, lineWidth: prominent ? 0 : 1.5))
+                .foregroundStyle(Paddle.Tone.ink)
+                .frame(maxWidth: 240, minHeight: 56)
+                .background(Paddle.Tone.cream, in: Capsule())
+                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         }
         .buttonStyle(.plain)
     }
 }
 
-private struct LinkHeader: View {
-    let link: PaddleLink
-    let launchedAt: Microseconds
-    let networkFailure: String?
+private struct QuietButton: View {
+    let title: String
+    let action: () -> Void
 
     var body: some View {
-        VStack(spacing: 4) {
-            Text(title.uppercased())
-                .font(Paddle.Typeface.small)
+        Button(action: action) {
+            Text(title)
+                .font(Paddle.Typeface.label)
                 .tracking(2)
-                .foregroundStyle(Paddle.Tone.cream)
-            if let detail {
-                Text(detail)
-                    .font(Paddle.Typeface.note)
-                    .foregroundStyle(Paddle.Tone.cream.opacity(0.7))
-                    .multilineTextAlignment(.center)
-            }
+                .foregroundStyle(Paddle.Tone.cream.opacity(0.85))
+                .padding(.horizontal, 22)
+                .frame(minHeight: 44)
+                .overlay(Capsule().strokeBorder(Paddle.Tone.cream.opacity(0.5), lineWidth: 1))
         }
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+    }
+}
+
+private struct Hint: View {
+    let text: String
+    let tone: Color
+
+    init(_ text: String, tone: Color) {
+        self.text = text
+        self.tone = tone
     }
 
-    private var title: String {
-        switch link.status {
-        case .searching: "Looking for your Mac…"
-        case .handshaking: "Connecting…"
-        case .paired(let hostName): "Connected to \(hostName)"
-        case .refused(.versionMismatch): "Update needed"
-        case .refused(.gameFull): "Game full"
-        case .refused: "Disconnected"
-        }
-    }
-
-    private var detail: String? {
-        if let networkFailure {
-            return "Allow Local Network access for Smarty Paddle in Settings › Privacy & Security › Local Network. (\(networkFailure))"
-        }
-        switch link.status {
-        case .paired:
-            return nil
-        case .refused(.versionMismatch):
-            return "This Mac runs a different version of Smarty Supreme. Update both apps."
-        case .refused(.gameFull):
-            return "Two players are already in. You'll join when a slot frees up."
-        case .refused:
-            return "The Mac ended the session."
-        case .searching:
-            return "Open Smarty Supreme on your Mac, on the same Wi-Fi."
-        case .handshaking:
-            return nil
-        }
+    var body: some View {
+        Text(text)
+            .font(Paddle.Typeface.detail)
+            .foregroundStyle(tone)
+            .multilineTextAlignment(.center)
     }
 }
 
