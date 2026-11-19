@@ -114,6 +114,7 @@ final class Match {
     var isChoosingNewGame = false
 
     @ObservationIgnored let link: HostLink
+    let referee: Referee
     @ObservationIgnored private let clock: any MonotonicClock
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var heldA: Set<Direction> = []
@@ -129,8 +130,10 @@ final class Match {
         self.setup = setup
         let session = Self.session(for: setup, link: link, clock: clock)
         self.session = session
+        referee = Referee(defaults: defaults)
         phase = session.game.phase
         publish()
+        startCommentary()
     }
 
     var game: GameState {
@@ -184,6 +187,7 @@ final class Match {
         if isHeld {
             session.hold()
         }
+        referee.follow(events, game: session.game)
         if events.contains(where: { if case .served = $0 { true } else { false } }) {
             controlsRequested = false
         }
@@ -270,6 +274,7 @@ final class Match {
         controlsRequested = true
         camera = .playerAEnd
         publish()
+        startCommentary()
     }
 
     func togglePause() {
@@ -311,6 +316,11 @@ final class Match {
     func releaseAllKeys() {
         heldA.removeAll()
         heldB.removeAll()
+    }
+
+    private func startCommentary() {
+        let opponent = Side.allCases.first { controller(of: $0) == .computer }
+        referee.newGame(names: Dictionary(uniqueKeysWithValues: Side.allCases.map { ($0, name(of: $0)) }), opponent: opponent)
     }
 
     private func addHold(_ reason: Hold) {

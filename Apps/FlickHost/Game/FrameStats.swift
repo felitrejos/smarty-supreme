@@ -5,6 +5,12 @@ import Observation
 @MainActor
 @Observable
 final class FrameStats {
+    struct Latencies: Equatable {
+        var swing: Microseconds?
+        var commentary: Microseconds?
+    }
+
+    static let commentaryBudget: Microseconds = 1_500_000
     static let budget: TimeInterval = 1.0 / 120
     static let cpuBudget = 0.2
     static let memoryGrowthBudget: Int64 = 5_000_000
@@ -18,21 +24,24 @@ final class FrameStats {
     private(set) var cpuShare: Double?
     private(set) var memoryBytes: UInt64 = 0
     private(set) var memoryGrowth: Int64 = 0
-    private(set) var swingLatency95: Microseconds?
+    private(set) var latencies = Latencies()
 
     @ObservationIgnored private var frames: [TimeInterval] = []
     @ObservationIgnored private var lastSample: ResourceSample?
     @ObservationIgnored private var firstMemory: UInt64?
     @ObservationIgnored private var sinceSummary: TimeInterval = 0
 
-    func record(_ frame: TimeInterval, swingLatency: () -> Microseconds? = { nil }) {
+    func record(_ frame: TimeInterval, latencies: () -> Latencies = { Latencies() }) {
         frames.append(frame)
         sinceSummary += frame
         guard sinceSummary >= Self.summaryInterval else { return }
         sinceSummary = 0
         summarize()
         sampleResources()
-        swingLatency95 = swingLatency()
+        let current = latencies()
+        if self.latencies != current {
+            self.latencies = current
+        }
     }
 
     private func sampleResources() {

@@ -14,6 +14,7 @@ public struct GameConfig: Equatable, Sendable {
     public var strengthBoost = 0.4
     public var maximumReturnAngleDegrees = 50.0
     public var contactShare = 0.7
+    public var edgeContact = 0.85
     public var serveSpreadDegrees = 15.0
     public var lagCompensation = 0.06
     public var swingCooldown = 0.3
@@ -58,6 +59,10 @@ public struct GameConfig: Equatable, Sendable {
 }
 
 extension Side {
+    public var playerName: String {
+        self == .playerA ? "Player A" : "Player B"
+    }
+
     public var opponent: Side {
         self == .playerA ? .playerB : .playerA
     }

@@ -199,6 +199,9 @@ public struct GameState: Equatable, Sendable {
         rally += 1
         block(side)
         events.append(.hit(side, strength: swing.strength, rally: rally))
+        if abs(contact) >= config.edgeContact {
+            events.append(.edgeHit(side))
+        }
     }
 
     private mutating func serve(by server: Side, strength: Double, aim: Double, events: inout [GameEvent]) {

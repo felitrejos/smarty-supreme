@@ -32,7 +32,12 @@ struct GameView: View {
                 stage.updates = content.subscribe(to: SceneEvents.Update.self) { event in
                     let events = match.advance()
                     scene.update(to: TablePose(game: match.game, events: events, dimmed: match.dimmed), elapsed: event.deltaTime)
-                    stats.record(event.deltaTime) { match.session.swingLatency.percentile(0.95) }
+                    stats.record(event.deltaTime) {
+                        FrameStats.Latencies(
+                            swing: match.session.swingLatency.percentile(0.95),
+                            commentary: match.referee.commentaryLatency.percentile(0.95)
+                        )
+                    }
                 }
             } catch {
                 stage.failure = "The table couldn’t be set up: \(error.localizedDescription)"
@@ -362,9 +367,13 @@ private struct FrameTimes: View {
             Text(frameText)
                 .foregroundStyle(meetsBudget ? Color.secondary : Color.orange)
             ResourceLine(stats: stats)
-            if let latency = stats.swingLatency95 {
+            if let latency = stats.latencies.swing {
                 Text(String(format: "Swings reach the game 95%% within %.0f ms, plus a frame to the screen", Double(latency) / 1_000))
                     .foregroundStyle(.secondary)
+            }
+            if let latency = stats.latencies.commentary {
+                Text(String(format: "Commentary starts 95%% within %.1f s of the play", Double(latency) / 1_000_000))
+                    .foregroundStyle(latency <= FrameStats.commentaryBudget ? Color.secondary : Color.orange)
             }
         }
         .font(.caption)

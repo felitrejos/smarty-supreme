@@ -23,6 +23,9 @@ struct GameCommands: Commands {
                 .disabled(controller.isViewer || !match.hasStarted || match.isGameOver || match.isHeld || match.isWaitingForADevice)
             Button("Swap Sides", action: match.swapSides)
                 .disabled(controller.isViewer || match.hasStarted)
+            Divider()
+            Toggle("Commentary", isOn: Bindable(match.referee).commentates)
+                .disabled(controller.isViewer)
         }
         CommandGroup(before: .toolbar) {
             ForEach(CameraView.allCases, id: \.self) { camera in

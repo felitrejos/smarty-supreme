@@ -71,6 +71,7 @@ public struct StepInput: Sendable {
 public enum GameEvent: Equatable, Sendable {
     case served(Side)
     case hit(Side, strength: Double, rally: Int)
+    case edgeHit(Side)
     case whiff(Side)
     case wallBounce
     case pointScored(winner: Side, score: Score)

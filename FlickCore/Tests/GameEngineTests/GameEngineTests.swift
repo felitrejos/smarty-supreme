@@ -71,6 +71,21 @@ struct GameEngineTests {
         #expect(abs(game.ball.velocity.y + cos(angle) * speed) < 1e-12)
     }
 
+    @Test(arguments: [(0.95, true), (0.5, false)])
+    func aReturnOffTheOuterPartOfThePaddleIsAnEdgeHit(share: Double, isEdge: Bool) {
+        var game = GameState(seed: 1, config: straightServes())
+        let config = game.config
+        let reach = config.paddleWidth / 2 + config.ballRadius
+        let target = config.position(ofPaddleX: config.tableWidth / 2 + share * reach)
+        _ = game.step(StepInput(swings: [serve(.playerA, in: game)]))
+        _ = game.run(until: { state, _ in state.ball.position.y >= state.zoneMiddle(of: .playerB) }, input: { _ in StepInput(targetB: target) })
+
+        let events = game.step(StepInput(targetB: target, swings: [Swing(side: .playerB, step: game.step, strength: 0.5, aim: 0)]))
+
+        #expect(events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
+        #expect(events.contains(.edgeHit(.playerB)) == isEdge)
+    }
+
     @Test func aReturnNeverExceedsTheMaximumSpeed() throws {
         var config = straightServes()
         config.startSpeed = 1.7

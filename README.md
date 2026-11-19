@@ -6,8 +6,8 @@ An iPhone is the paddle, a Mac is the table. Tilt the phone to move your paddle 
 
 | Path | What it is |
 | --- | --- |
-| `FlickCore/` | Swift package with all hardware-free logic: swing detection and paddle mapping, the binary protocol and links, the 240 Hz game engine, the computer opponent, the match session (lobby, pauses, reconnects) and the second-Mac viewer. `FlickTestSupport` holds the fakes (`ManualClock`, `LoopbackNetwork`). `FixtureTools` and the `flick-fixtures` command check and split the motion dataset. |
-| `Apps/FlickHost/` | Mac app (macOS 26+): the 3D table, keyboard input, sound, and the iPhone Paddles window. It can also act as Player B's screen for another Mac. |
+| `FlickCore/` | Swift package with all hardware-free logic: swing detection and paddle mapping, the binary protocol and links, the 240 Hz game engine, the computer opponent, the match session (lobby, pauses, reconnects), the second-Mac viewer, and the referee's commentary. `FlickTestSupport` holds the fakes (`ManualClock`, `LoopbackNetwork`). `FixtureTools` and the `flick-fixtures` command check and split the motion dataset. |
+| `Apps/FlickHost/` | Mac app (macOS 26+): the 3D table, keyboard input, sound, the voice referee, and the iPhone Paddles window. It can also act as Player B's screen for another Mac. |
 | `Apps/FlickPaddle/` | iPhone paddle (iOS 18+): pairs with the Mac, calibrates, sends tilt at 60 Hz and swings as they happen, and plays haptics |
 | `Apps/FlickRecorder/` | iPhone app that records labelled motion data for the swing detector |
 | `Apps/Shared/` | Core Motion wrapper shared by the iPhone apps |
@@ -71,6 +71,10 @@ During a match:
 
 On an iPhone without motion sensors (the simulator), drag along the bar to move and swipe up to swing.
 
+### Referee
+
+The Mac calls the score out loud: one line per point, plus a highlight for a rally of 10, a smash winner, deuce or match point. Against the computer, the computer answers back in its own voice now and then: a taunt after a smash, a groan after a lucky edge, nerves at match point. Game › Commentary turns both off. They use the Mac's system voices; for the best sound, download Premium English voices in System Settings › Accessibility › Spoken Content.
+
 ## Recording the motion dataset
 
 1. Run FlickRecorder on an iPhone. Pick the participant and the activity, then tap Start recording.
@@ -98,4 +102,5 @@ swift run --package-path FlickCore flick-fixtures split Fixtures/recordings Fixt
 | Player B's screen within 15 ms of the host (95%) | Show Frame Times on the second Mac |
 | Swing to the game p95, Mac CPU at most 20% of a core, memory growth under 5 MB | Show Frame Times; values over budget turn orange |
 | iPhone CPU at most 15%, battery at most 8% per 30 min | The footer of the paddle app; battery shows while unplugged |
+| Commentary within 1.5 s of the play (95%) | Show Frame Times, once the referee has spoken |
 | Engine step p99 under 0.1 ms | `EngineBenchmarkTests`, part of the test run |
