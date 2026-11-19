@@ -1,4 +1,4 @@
-import FlickCore
+import SmartyCore
 import Foundation
 import MultipeerConnectivity
 import Synchronization
@@ -16,7 +16,7 @@ final class MultipeerTransport: NSObject, Transport, @unchecked Sendable {
         var connected: [PeerID: ImmutablePeerID] = [:]
     }
 
-    private static let serviceType = "flickpong"
+    private static let serviceType = "smartysupreme"
     private static let invitationTimeout: TimeInterval = 10
 
     private let session: MCSession

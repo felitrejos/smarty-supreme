@@ -1,4 +1,4 @@
-import FlickCore
+import SmartyCore
 import SwiftUI
 
 extension Side {

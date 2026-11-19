@@ -1,5 +1,5 @@
 import CoreMotion
-import FlickCore
+import SmartyCore
 import simd
 
 @MainActor

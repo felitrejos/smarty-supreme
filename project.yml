@@ -1,4 +1,4 @@
-name: FlickPong
+name: SmartySupreme
 options:
   deploymentTarget:
     iOS: "18.0"
@@ -13,45 +13,46 @@ settings:
     DEVELOPMENT_TEAM: WXKM9YZDXT
     CODE_SIGN_STYLE: Automatic
 packages:
-  FlickCore:
-    path: FlickCore
+  SmartyCore:
+    path: SmartyCore
 targets:
-  FlickPaddle:
+  SmartyPaddle:
     type: application
     platform: iOS
-    sources: [Apps/FlickPaddle, Apps/Shared, Apps/Link, Apps/Style]
+    sources: [Apps/SmartyPaddle, Apps/Shared, Apps/Link, Apps/Style]
     dependencies:
-      - package: FlickCore
+      - package: SmartyCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.flickpong.paddle
-        INFOPLIST_FILE: Apps/FlickPaddle/Info.plist
-        INFOPLIST_KEY_CFBundleDisplayName: Flick Paddle
+        PRODUCT_BUNDLE_IDENTIFIER: com.smartysupreme.paddle
+        INFOPLIST_FILE: Apps/SmartyPaddle/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: Smarty Paddle
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
     scheme: {}
-  FlickRecorder:
+  SmartyRecorder:
     type: application
     platform: iOS
-    sources: [Apps/FlickRecorder, Apps/Shared]
+    sources: [Apps/SmartyRecorder, Apps/Shared]
     dependencies:
-      - package: FlickCore
+      - package: SmartyCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.flickpong.recorder
-        INFOPLIST_KEY_CFBundleDisplayName: Flick Recorder
+        PRODUCT_BUNDLE_IDENTIFIER: com.smartysupreme.recorder
+        INFOPLIST_KEY_CFBundleDisplayName: Smarty Recorder
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
-        INFOPLIST_FILE: Apps/FlickRecorder/Info.plist
+        INFOPLIST_FILE: Apps/SmartyRecorder/Info.plist
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         TARGETED_DEVICE_FAMILY: "1"
     scheme: {}
-  FlickHost:
+  SmartyHost:
     type: application
     platform: macOS
     sources:
-      - Apps/FlickHost
+      - Apps/SmartyHost
       - Apps/Link
       - Apps/Style
       - path: Assets/Lighting
@@ -73,14 +74,17 @@ targets:
         buildPhase: resources
         excludes: ["*.md"]
     dependencies:
-      - package: FlickCore
+      - package: SmartyCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.flickpong.host
-        INFOPLIST_FILE: Apps/FlickHost/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.smartysupreme.host
+        PRODUCT_NAME: Smarty Supreme
+        PRODUCT_MODULE_NAME: SmartyHost
+        INFOPLIST_FILE: Apps/SmartyHost/Info.plist
         ENABLE_INCOMING_NETWORK_CONNECTIONS: YES
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Flick Pong
+        INFOPLIST_KEY_CFBundleDisplayName: Smarty Supreme
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.sports-games
         ENABLE_APP_SANDBOX: YES
         ENABLE_HARDENED_RUNTIME: YES

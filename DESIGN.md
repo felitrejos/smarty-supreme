@@ -1,4 +1,4 @@
-# Flick Pong design
+# Smarty Supreme design
 
 The Mac shows one match in a 1950s arena: the London tournament in *Marty Supreme* (A24, 2025), checked against real 1950s English Open and World Championship photos at the Empire Pool, Wembley. The iPhone is a hardbat paddle.
 

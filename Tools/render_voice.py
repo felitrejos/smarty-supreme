@@ -1,6 +1,6 @@
 """Render every referee and computer line with Kokoro into Assets/Voice.
 
-    swift run --package-path FlickCore flick-voice-lines > lines.json
+    swift run --package-path SmartyCore smarty-voice-lines > lines.json
     python render_voice.py lines.json Assets/Voice
 
 Needs `pip install kokoro soundfile` and macOS's afconvert.
