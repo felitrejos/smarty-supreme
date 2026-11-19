@@ -26,7 +26,7 @@ final class PaddleSensing: Sendable {
     }
 
     private struct State {
-        var sensitivity = Sensitivity.low
+        let sensitivity = Sensitivity.low
         var calibration = CalibrationStatus.needed
         var calibrator: Calibrator?
         var mapper: PointerMapper?
@@ -79,15 +79,6 @@ final class PaddleSensing: Sendable {
 
     func setTouchPosition(_ position: Double) {
         state.withLock { $0.reading = .position(position) }
-    }
-
-    func setSensitivity(_ sensitivity: Sensitivity) -> Bool {
-        state.withLock { state in
-            state.sensitivity = sensitivity
-            guard let mapper = state.mapper else { return false }
-            state.mapper = PointerMapper(neutralRollDegrees: mapper.neutralRollDegrees, sensitivity: sensitivity)
-            return true
-        }
     }
 
     func process(_ sample: MotionSample) -> Outcome {

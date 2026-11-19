@@ -21,7 +21,7 @@ public struct Commentator: Sendable {
     public static let longRally = 10
     public static let staleAfter: Microseconds = 3_000_000
     public static let opponentLongRally = 8
-    public static let opponentPlainPointChance = 0.25
+    public static let opponentPlainPointChance = 0.8
 
     private struct Point {
         var rally = 0
@@ -73,13 +73,13 @@ public struct Commentator: Sendable {
             case .whiff(let side):
                 point.whiffBy = side
             case .pointScored(let pointWinner, let score):
+                if let opponent, let reaction = reaction(of: opponent, toPointWonBy: pointWinner, score: score, target: target, gameWinner: winner) {
+                    queue.append(CommentaryLine(text: say(reaction), kind: .opponent, createdAt: now))
+                }
                 if let winner {
                     queue.append(CommentaryLine(text: Umpire.game(name(winner), score: score, target: target), kind: .call, createdAt: now))
                 } else {
                     callPoint(won: pointWinner, score: score, target: target, at: now)
-                }
-                if let opponent, let reaction = reaction(of: opponent, toPointWonBy: pointWinner, score: score, target: target, gameWinner: winner) {
-                    queue.append(CommentaryLine(text: say(reaction), kind: .opponent, createdAt: now))
                 }
                 point = Point()
             case .wallBounce, .gameOver, .paused, .resumed:
@@ -90,7 +90,7 @@ public struct Commentator: Sendable {
 
     public mutating func next(at now: Microseconds, duringRally: Bool) -> CommentaryLine? {
         queue.removeAll { now - min(now, $0.createdAt) > Self.staleAfter }
-        guard let index = queue.firstIndex(where: { !duringRally || $0.kind == .highlight }) else { return nil }
+        guard let index = queue.firstIndex(where: { !duringRally || $0.kind != .call }) else { return nil }
         return queue.remove(at: index)
     }
 

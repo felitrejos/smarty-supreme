@@ -159,23 +159,23 @@ struct OpponentLineTests {
         #expect(lines.filter { $0.kind == .opponent }.count == 1)
     }
 
-    @Test func theComputerSpeaksAfterTheReferee() {
+    @Test func theComputerSpeaksBeforeTheReferee() {
         var commentator = Commentator(names: names, opponent: .playerB, seed: 1)
         commentator.observe([.hit(.playerB, strength: 0.9, rally: 2), .pointScored(winner: .playerB, score: Score(a: 1, b: 2))], at: 0)
 
-        #expect(drain(&commentator).map(\.kind) == [.call, .highlight, .opponent])
+        #expect(drain(&commentator).map(\.kind) == [.opponent, .call, .highlight])
     }
 
-    @Test func theComputerWaitsForTheRallyToEnd() {
+    @Test func theComputerCanStillTalkOnceTheNextRallyStarts() {
         var commentator = Commentator(names: names, opponent: .playerB, seed: 1)
         commentator.observe([.whiff(.playerA), .pointScored(winner: .playerB, score: Score(a: 1, b: 2))], at: 0)
-        _ = commentator.next(at: 0, duringRally: false)
 
+        #expect(commentator.next(at: 0, duringRally: true)?.kind == .opponent)
         #expect(commentator.next(at: 0, duringRally: true) == nil)
-        #expect(commentator.next(at: 0, duringRally: false)?.kind == .opponent)
+        #expect(commentator.next(at: 0, duringRally: false)?.kind == .call)
     }
 
-    @Test func plainPointsGetAReactionOnlySometimes() {
+    @Test func mostPlainPointsGetAReaction() {
         var commentator = Commentator(names: names, opponent: .playerB, seed: 7)
         var reactions = 0
         for point in 1...100 {
@@ -183,7 +183,7 @@ struct OpponentLineTests {
             reactions += drain(&commentator).filter { $0.kind == .opponent }.count
         }
 
-        #expect((10...40).contains(reactions))
+        #expect((65...95).contains(reactions))
     }
 
     @Test func theSameLineIsNeverSaidTwiceInARow() {

@@ -76,12 +76,6 @@ final class PaddleController {
         sensing.setTouchPosition(TouchInput.position(x: x, width: width))
     }
 
-    func setSensitivity(_ sensitivity: Sensitivity) {
-        if sensing.setSensitivity(sensitivity) {
-            link.announceCalibration(sensitivity)
-        }
-    }
-
     private func haltForVersionMismatch() {
         isHalted = true
         guard pauseSensing() else { return }

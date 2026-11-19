@@ -46,9 +46,6 @@ struct PaddleView: View {
                     }
                     Spacer(minLength: 0)
                     playArea(snapshot)
-                    if isMotionAvailable {
-                        SensitivityPicker(selected: snapshot.sensitivity, select: controller.setSensitivity)
-                    }
                 }
                 .padding(.horizontal, 30)
                 .padding(.top, 34)
@@ -259,28 +256,6 @@ private struct Stamp: View {
         .shadow(color: .black.opacity(0.4), radius: 0, x: 0, y: 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Flick Pong")
-    }
-}
-
-private struct SensitivityPicker: View {
-    let selected: Sensitivity
-    let select: (Sensitivity) -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(Sensitivity.allCases, id: \.self) { sensitivity in
-                Button { select(sensitivity) } label: {
-                    Text("\(Int(sensitivity.rangeDegrees))°")
-                        .font(Paddle.Typeface.small)
-                        .tracking(1)
-                        .foregroundStyle(sensitivity == selected ? Paddle.Tone.ink : Paddle.Tone.cream)
-                        .frame(maxWidth: .infinity, minHeight: 30)
-                        .background(sensitivity == selected ? Paddle.Tone.cream : Paddle.Tone.cream.opacity(0.12), in: Capsule())
-                }
-                .accessibilityLabel("Tilt range \(Int(sensitivity.rangeDegrees)) degrees")
-                .accessibilityAddTraits(sensitivity == selected ? .isSelected : [])
-            }
-        }
     }
 }
 

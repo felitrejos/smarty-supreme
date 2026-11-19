@@ -13,8 +13,8 @@ public enum Sensitivity: CaseIterable, Sendable {
 }
 
 public struct PointerConfig: Sendable {
-    public var minimumCutoff = 1.0
-    public var beta = 10.0
+    public var minimumCutoff = 0.5
+    public var beta = 4.0
     public var derivativeCutoff = 5.0
     public var minimumUprightness = 0.5
     public var notUprightAfter: Microseconds = 750_000
