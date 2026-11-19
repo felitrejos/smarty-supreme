@@ -10,7 +10,7 @@
 A packed hall, one table under the lights, an umpire calling every point, and a computer opponent who learned to talk on tech Twitter. Tilt your phone to move, swing it at the screen to hit.
 
 - **Play the computer** on Easy, Medium or Hard, and hear about it when you miss.
-- **Play a friend** with two phones, or bring a second Mac so each of you gets an end.
+- **Play a friend** side by side in split screen, or bring a second Mac so each of you gets a full screen.
 - **No phone?** Play on the keyboard: A D W for Player A, ← → ↑ for Player B.
 
 Needs macOS 26 and iOS 18. [Build it from source](docs/DEVELOPMENT.md).

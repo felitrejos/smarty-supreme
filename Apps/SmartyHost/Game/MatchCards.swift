@@ -168,7 +168,7 @@ struct InterruptionCard: View {
         case .phoneLost(let side, let until):
             "\(side.playerName) forfeits in \(secondsLeft(until)) s unless the iPhone reconnects."
         case .viewerLost:
-            "Waiting for it to come back. Both players can tap Continue to play on with the side view."
+            "Waiting for it to come back. Both players can tap Continue to play on in split screen."
         }
     }
 
@@ -178,7 +178,7 @@ struct InterruptionCard: View {
         case .phoneLost:
             Button("Play On With the Keyboard", action: match.playOnWithoutTheMissingDevice)
         case .viewerLost:
-            Button("Switch to the Side View", action: match.playOnWithoutTheMissingDevice)
+            Button("Switch to Split Screen", action: match.playOnWithoutTheMissingDevice)
         case .byHost, .onHold, .byPlayer, .pointerLost, .serveTimeouts:
             Button("Resume", action: match.togglePause)
                 .keyboardShortcut(.defaultAction)

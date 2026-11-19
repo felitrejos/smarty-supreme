@@ -7,12 +7,14 @@ enum CameraView: CaseIterable {
     case playerAEnd
     case playerBEnd
     case side
+    case split
 
     var title: String {
         switch self {
         case .playerAEnd: "Player A’s End"
         case .playerBEnd: "Player B’s End"
         case .side: "Side View"
+        case .split: "Split Screen"
         }
     }
 
@@ -21,6 +23,7 @@ enum CameraView: CaseIterable {
         case .playerAEnd: "1"
         case .playerBEnd: "2"
         case .side: "3"
+        case .split: "4"
         }
     }
 }
@@ -193,10 +196,10 @@ final class Match {
         }
         publish()
         if wasWaiting, stage == .playing, setup.opponent == .player {
-            camera = link.viewerName == nil ? .side : .playerAEnd
+            camera = link.viewerName == nil ? .split : .playerAEnd
         }
-        if session.usesSideCamera, camera != .side {
-            camera = .side
+        if session.usesSideCamera, camera != .split {
+            camera = .split
         }
         return events
     }
@@ -395,7 +398,8 @@ final class Match {
     }
 
     private func keyboardTarget(for side: Side) -> Double {
-        switch steering(held(side)) {
+        let facesPlayerBEnd = side == .playerB && [.split, .playerBEnd].contains(camera)
+        return switch steering(held(side)) * (facesPlayerBEnd ? -1 : 1) {
         case ..<0: 0
         case 0: session.game.paddlePosition(of: side)
         default: 1

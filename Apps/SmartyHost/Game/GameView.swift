@@ -10,6 +10,35 @@ final class Stage {
     var scene: TableScene?
     var failure: String?
     @ObservationIgnored var updates: EventSubscription?
+    @ObservationIgnored let feed = PoseFeed()
+}
+
+@MainActor
+final class PoseFeed {
+    private static let backlog = 8
+
+    var isListening = false {
+        didSet {
+            if !isListening {
+                pending.removeAll()
+            }
+        }
+    }
+
+    private var pending: [(pose: TablePose, elapsed: TimeInterval)] = []
+
+    func push(_ pose: TablePose, elapsed: TimeInterval) {
+        guard isListening else { return }
+        pending.append((pose, elapsed))
+        if pending.count > Self.backlog {
+            pending.removeFirst()
+        }
+    }
+
+    func drain() -> [(pose: TablePose, elapsed: TimeInterval)] {
+        defer { pending.removeAll() }
+        return pending
+    }
 }
 
 struct GameView: View {
@@ -22,20 +51,14 @@ struct GameView: View {
     @Environment(\.controlActiveState) private var activeState
 
     var body: some View {
-        RealityView { [match, stats, stage] content in
-            content.camera = .virtual
-            do {
-                let scene = try await TableScene(config: match.game.config)
-                content.add(scene.root)
-                scene.show(match.camera, animated: false)
-                stage.scene = scene
-                stage.updates = content.subscribe(to: SceneEvents.Update.self) { event in
-                    let events = match.advance()
-                    scene.update(to: TablePose(game: match.game, events: events, dimmed: match.dimmed), elapsed: event.deltaTime)
-                    stats.record(event.deltaTime)
-                }
-            } catch {
-                stage.failure = "The table couldn’t be set up: \(error.localizedDescription)"
+        HStack(spacing: 0) {
+            arena
+            if match.camera == .split {
+                Rectangle()
+                    .fill(Programme.ink)
+                    .frame(width: 3)
+                    .accessibilityHidden(true)
+                PlayerBArena(feed: stage.feed, config: match.game.config)
             }
         }
         .overlay {
@@ -122,7 +145,28 @@ struct GameView: View {
             match.screenUnlocked()
         }
         .onChange(of: match.camera) { _, camera in
-            stage.scene?.show(camera, animated: true)
+            stage.scene?.show(camera, halfScreen: camera == .split, animated: true)
+        }
+    }
+
+    private var arena: some View {
+        RealityView { [match, stats, stage] content in
+            content.camera = .virtual
+            do {
+                let scene = try await TableScene(config: match.game.config)
+                content.add(scene.root)
+                scene.show(match.camera, halfScreen: match.camera == .split, animated: false)
+                stage.scene = scene
+                stage.updates = content.subscribe(to: SceneEvents.Update.self) { event in
+                    let events = match.advance()
+                    let pose = TablePose(game: match.game, events: events, dimmed: match.dimmed)
+                    scene.update(to: pose, elapsed: event.deltaTime)
+                    stage.feed.push(pose, elapsed: event.deltaTime)
+                    stats.record(event.deltaTime)
+                }
+            } catch {
+                stage.failure = "The table couldn’t be set up: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -160,6 +204,35 @@ struct GameView: View {
         case .paused: "Paused"
         case .gameOver(let winner): "\(match.name(of: winner)) wins"
         }
+    }
+}
+
+private struct PlayerBArena: View {
+    let feed: PoseFeed
+    let config: GameConfig
+
+    @State private var stage = Stage()
+
+    var body: some View {
+        RealityView { [feed, config, stage] content in
+            content.camera = .virtual
+            do {
+                let scene = try await TableScene(config: config, playsSounds: false)
+                content.add(scene.root)
+                scene.show(.playerBEnd, halfScreen: true, animated: false)
+                stage.scene = scene
+                stage.updates = content.subscribe(to: SceneEvents.Update.self) { _ in
+                    for (pose, elapsed) in feed.drain() {
+                        scene.update(to: pose, elapsed: elapsed)
+                    }
+                }
+            } catch {
+                stage.failure = error.localizedDescription
+            }
+        }
+        .onAppear { feed.isListening = true }
+        .onDisappear { feed.isListening = false }
+        .accessibilityLabel("Player B’s end of the table")
     }
 }
 

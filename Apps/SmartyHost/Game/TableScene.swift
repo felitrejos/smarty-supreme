@@ -128,6 +128,9 @@ final class TableScene {
     private static let maximumRoll: Float = 0.3
     private static let paddleLiftPerSpeed: Float = 0.02
     private static let spinShare: Float = 0.1
+    private static let fieldOfView: Float = 34
+    private static let halfScreenWidthFieldOfView: Float = 42
+    private static let halfScreenTargetHeight: Float = 0.4
     private static let maximumSpin: Float = 28
 
     let root = Entity()
@@ -135,7 +138,7 @@ final class TableScene {
     private let ball: ModelEntity
     private let glow = Equipment.ghostBall()
     private let trail = (0..<Impact.trailLength).map { _ in Equipment.ghostBall() }
-    private let sounds: SoundBoard
+    private let sounds: SoundBoard?
     private let crowd: Crowd
     private var paddles: [(side: Side, root: Entity, pivot: Entity)] = []
     private var motions: [Side: PaddleMotion] = [:]
@@ -149,9 +152,9 @@ final class TableScene {
     private var view = CameraView.playerAEnd
     private let config: GameConfig
 
-    init(config: GameConfig) async throws {
+    init(config: GameConfig, playsSounds: Bool = true) async throws {
         self.config = config
-        sounds = try SoundBoard()
+        sounds = playsSounds ? try SoundBoard() : nil
         let width = Float(config.tableWidth) * Size.metresPerTableLength
         let materials = try await Equipment.Materials.make(tableWidth: width)
         ball = Equipment.ball(materials)
@@ -214,16 +217,21 @@ final class TableScene {
             root.addChild(ghost)
         }
         Self.receiveLight(from: hall.light, in: lit)
-        camera.camera.fieldOfViewInDegrees = 34
+        camera.camera.fieldOfViewInDegrees = Self.fieldOfView
         camera.camera.far = Self.farPlane
         root.addChild(camera)
         show(.playerAEnd, animated: false)
     }
 
-    func show(_ view: CameraView, animated: Bool) {
+    func show(_ view: CameraView, halfScreen: Bool = false, animated: Bool) {
         self.view = view
+        camera.camera.fieldOfViewOrientation = halfScreen ? .horizontal : .vertical
+        camera.camera.fieldOfViewInDegrees = halfScreen ? Self.halfScreenWidthFieldOfView : Self.fieldOfView
         let placement = Entity()
-        let (position, target) = Self.placement(for: view)
+        var (position, target) = Self.placement(for: view)
+        if halfScreen {
+            target.y = Self.halfScreenTargetHeight
+        }
         placement.look(at: target, from: position, relativeTo: nil)
         if animated {
             camera.move(to: placement.transform, relativeTo: nil, duration: 1.1, timingFunction: .easeInOut)
@@ -238,18 +246,18 @@ final class TableScene {
         for contact in pose.contacts {
             motions[contact.side]?.hit(strength: Float(contact.isWhiff ? Self.whiffStrength : contact.strength))
             if !contact.isWhiff {
-                sounds.play(.paddle(strength: contact.strength), pan: pan(at: pose.ball))
+                sounds?.play(.paddle(strength: contact.strength), pan: pan(at: pose.ball))
                 glowElapsed = 0
             }
         }
         switch pose.outcome {
-        case .point: sounds.play(.point, pan: 0)
-        case .win: sounds.play(.win, pan: 0)
+        case .point: sounds?.play(.point, pan: 0)
+        case .win: sounds?.play(.win, pan: 0)
         case nil: break
         }
         crowd.update(elapsed: elapsed, cheer: pose.outcome != nil)
         if let progress = arc.progress, let lastProgress, lastProgress < Arc.bounceAt, progress >= Arc.bounceAt {
-            sounds.play(.table, pan: pan(at: pose.ball))
+            sounds?.play(.table, pan: pan(at: pose.ball))
         }
         lastProgress = arc.progress
         showScore(pose.score)
@@ -365,7 +373,7 @@ final class TableScene {
         switch view {
         case .playerAEnd: return across * Self.panWidth
         case .playerBEnd: return -across * Self.panWidth
-        case .side: return along * Self.panWidth
+        case .side, .split: return along * Self.panWidth
         }
     }
 
@@ -393,7 +401,7 @@ final class TableScene {
 
     private static func placement(for view: CameraView) -> (SIMD3<Float>, SIMD3<Float>) {
         switch view {
-        case .playerAEnd: ([0, 1.65, 3.4], [0, 0.68, -0.5])
+        case .playerAEnd, .split: ([0, 1.65, 3.4], [0, 0.68, -0.5])
         case .playerBEnd: ([0, 1.65, -3.4], [0, 0.68, 0.5])
         case .side: ([5.4, 1.45, 0.6], [0, 0.7, 0])
         }
