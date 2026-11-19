@@ -26,7 +26,7 @@ final class PaddleSensing: Sendable {
     }
 
     private struct State {
-        var sensitivity = Sensitivity.medium
+        var sensitivity = Sensitivity.low
         var calibration = CalibrationStatus.needed
         var calibrator: Calibrator?
         var mapper: PointerMapper?

@@ -29,16 +29,12 @@ public struct SwingDetector: Sendable {
         var peakAcceleration: Double
         var peakRotationRate: Double
 
-        init(_ sample: MotionSample, acceleration: Double) {
-            start = sample.time
+        init(_ sample: MotionSample, acceleration: Double, motionSince: Microseconds) {
+            start = motionSince
             uprightness = sample.uprightness
             peak = sample
             peakAcceleration = acceleration
             peakRotationRate = simd_length(sample.rotationRate)
-        }
-
-        var riseTime: Microseconds {
-            peak.time - start
         }
 
         mutating func include(_ sample: MotionSample, acceleration: Double) {
@@ -59,6 +55,7 @@ public struct SwingDetector: Sendable {
 
     private let config: SwingConfig
     private var state = State.idle
+    private var motionSince: Microseconds?
     private var lowGravitySince: Microseconds?
     private var isFalling = false
 
@@ -89,12 +86,14 @@ public struct SwingDetector: Sendable {
         }
         switch state {
         case .idle:
-            if acceleration > config.onThreshold {
-                state = .rising(Spike(sample, acceleration: acceleration))
+            motionSince = acceleration > config.offThreshold ? motionSince ?? sample.time : nil
+            if acceleration > config.onThreshold, let motionSince {
+                state = .rising(Spike(sample, acceleration: acceleration, motionSince: motionSince))
+                self.motionSince = nil
             }
         case .rising(var spike):
             spike.include(sample, acceleration: acceleration)
-            if spike.riseTime >= config.minimumRiseTime,
+            if sample.time - spike.start >= config.minimumDuration,
                acceleration <= config.reportFraction * spike.peakAcceleration {
                 return report(spike, at: sample.time)
             }

@@ -1,10 +1,10 @@
 public struct SwingConfig: Sendable {
-    public var onThreshold = 2.5
+    public var onThreshold = 1.8
     public var offThreshold = 1.0
-    public var minimumRiseTime: Microseconds = 20_000
+    public var minimumDuration: Microseconds = 20_000
     public var reportFraction = 0.9
     public var maximumDuration: Microseconds = 250_000
-    public var minimumRotationRate = 3.0
+    public var minimumRotationRate = 8.0
     public var cooldown: Microseconds = 300_000
     public var ceiling = 8.0
     public var minimumUprightness = 0.5

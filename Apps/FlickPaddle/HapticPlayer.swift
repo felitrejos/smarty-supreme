@@ -3,6 +3,8 @@ import UIKit
 
 @MainActor
 final class HapticPlayer {
+    private static let lightestHit = 0.45
+
     private let contact = UIImpactFeedbackGenerator(style: .rigid)
     private let whiff = UIImpactFeedbackGenerator(style: .soft)
     private let outcome = UINotificationFeedbackGenerator()
@@ -13,10 +15,10 @@ final class HapticPlayer {
         outcome.prepare()
     }
 
-    func play(_ kind: HapticKind) {
+    func play(_ kind: HapticKind, swingStrength: Double?) {
         switch kind {
         case .hit:
-            contact.impactOccurred(intensity: 1)
+            contact.impactOccurred(intensity: Self.lightestHit + (1 - Self.lightestHit) * (swingStrength ?? 0))
             contact.prepare()
         case .miss:
             whiff.impactOccurred(intensity: 0.5)

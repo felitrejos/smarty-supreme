@@ -10,6 +10,8 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     GENERATE_INFOPLIST_FILE: YES
+    DEVELOPMENT_TEAM: WXKM9YZDXT
+    CODE_SIGN_STYLE: Automatic
 packages:
   FlickCore:
     path: FlickCore
@@ -53,6 +55,9 @@ targets:
       - Apps/Link
       - path: Assets/Lighting
         buildPhase: resources
+      - path: Assets/Sounds
+        buildPhase: resources
+        excludes: ["*.md"]
     dependencies:
       - package: FlickCore
     settings:

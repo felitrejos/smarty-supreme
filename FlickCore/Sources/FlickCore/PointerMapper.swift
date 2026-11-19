@@ -17,6 +17,7 @@ public struct PointerConfig: Sendable {
     public var beta = 10.0
     public var derivativeCutoff = 5.0
     public var minimumUprightness = 0.5
+    public var notUprightAfter: Microseconds = 750_000
     public var calibrationDuration: Microseconds = 500_000
     public var maximumCalibrationVariationDegrees = 3.0
 
@@ -34,6 +35,7 @@ public struct PointerMapper: Sendable {
     private let config: PointerConfig
     private var filter: OneEuroFilter
     private var lastPosition: Double?
+    private var tiltedSince: Microseconds?
 
     public init(neutralRollDegrees: Double, sensitivity: Sensitivity, config: PointerConfig = PointerConfig()) {
         self.neutralRollDegrees = neutralRollDegrees
@@ -46,7 +48,13 @@ public struct PointerMapper: Sendable {
         if holding, let lastPosition {
             return .position(lastPosition)
         }
-        guard sample.uprightness >= config.minimumUprightness else { return .notUpright }
+        guard sample.uprightness >= config.minimumUprightness else {
+            let since = tiltedSince ?? sample.time
+            tiltedSince = since
+            guard let lastPosition, sample.time - since < config.notUprightAfter else { return .notUpright }
+            return .position(lastPosition)
+        }
+        tiltedSince = nil
         let relativeRoll = sample.rollDegrees - neutralRollDegrees
         let raw = min(max(0.5 + relativeRoll / (2 * sensitivity.rangeDegrees), 0), 1)
         let position = filter.filter(raw, at: sample.time)

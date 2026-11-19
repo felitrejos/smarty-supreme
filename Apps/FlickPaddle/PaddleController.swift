@@ -28,8 +28,9 @@ final class PaddleController {
             name: String(UIDevice.current.name.prefix(Self.longestName)),
             transport: transport,
             clock: SystemClock(),
-            onHaptic: { [haptics] kind in
-                Task { @MainActor in haptics.play(kind) }
+            onHaptic: { [haptics, sensing] kind in
+                let swingStrength = sensing.snapshot.lastSwing?.strength
+                Task { @MainActor in haptics.play(kind, swingStrength: swingStrength) }
             }
         )
         relay.connect(link.handle)

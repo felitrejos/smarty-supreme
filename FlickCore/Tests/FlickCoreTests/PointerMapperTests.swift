@@ -25,12 +25,39 @@ struct PointerMapperTests {
         #expect(reading == .position(1))
     }
 
-    @Test func pausesWhileThePhoneIsNotUpright() {
+    @Test func aPhoneThatHasNeverBeenUprightGivesNoPosition() {
         var mapper = PointerMapper(neutralRollDegrees: 0, sensitivity: .medium)
         var signal = MotionSignal()
         signal.gravity = MotionSignal.flat
         signal.hold(for: 10_000)
         #expect(mapper.update(signal.samples[0], holding: false) == .notUpright)
+    }
+
+    @Test func aSwingThatTipsThePhoneBackKeepsThePaddleWhereItWas() {
+        var mapper = PointerMapper(neutralRollDegrees: 0, sensitivity: .medium)
+        var signal = MotionSignal()
+        signal.tilt(rollDegrees: 10, for: 500_000)
+        let upright = signal.samples.count
+        signal.gravity = MotionSignal.flat
+        signal.hold(for: 500_000)
+        let readings = signal.samples.map { mapper.update($0, holding: false) }
+        let before = readings[upright - 1]
+
+        #expect(readings[upright...].allSatisfy { $0 == before })
+    }
+
+    @Test func stayingTiltedForThreeQuartersOfASecondPausesThePaddle() {
+        var mapper = PointerMapper(neutralRollDegrees: 0, sensitivity: .medium)
+        var signal = MotionSignal()
+        signal.tilt(rollDegrees: 10, for: 500_000)
+        let upright = signal.samples.count
+        signal.gravity = MotionSignal.flat
+        signal.hold(for: 1_000_000)
+        let readings = signal.samples.map { mapper.update($0, holding: false) }
+        let tilted = readings[upright...]
+
+        #expect(tilted.prefix(74).allSatisfy { $0 != .notUpright })
+        #expect(tilted.dropFirst(75).allSatisfy { $0 == .notUpright })
     }
 
     @Test func holdsThePositionFromBeforeTheSwing() throws {

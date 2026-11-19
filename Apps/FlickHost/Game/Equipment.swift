@@ -204,6 +204,14 @@ enum Equipment {
         return (root, pivot)
     }
 
+    static func ghostBall() -> ModelEntity {
+        var material = UnlitMaterial(color: .white)
+        material.blending = .transparent(opacity: 1.0)
+        let ghost = ModelEntity(mesh: .generateSphere(radius: Size.ballRadius), materials: [material])
+        ghost.isEnabled = false
+        return ghost
+    }
+
     static func ball() -> ModelEntity {
         var material = PhysicallyBasedMaterial()
         material.baseColor = .init(tint: NSColor(white: 0.97, alpha: 1))
