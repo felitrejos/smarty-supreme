@@ -373,7 +373,7 @@ final class TableScene {
         switch view {
         case .playerAEnd: return across * Self.panWidth
         case .playerBEnd: return -across * Self.panWidth
-        case .side, .split: return along * Self.panWidth
+        case .split: return along * Self.panWidth
         }
     }
 
@@ -403,7 +403,6 @@ final class TableScene {
         switch view {
         case .playerAEnd, .split: ([0, 1.65, 3.4], [0, 0.68, -0.5])
         case .playerBEnd: ([0, 1.65, -3.4], [0, 0.68, 0.5])
-        case .side: ([5.4, 1.45, 0.6], [0, 0.7, 0])
         }
     }
 

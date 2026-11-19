@@ -6,14 +6,12 @@ import SwiftUI
 enum CameraView: CaseIterable {
     case playerAEnd
     case playerBEnd
-    case side
     case split
 
     var title: String {
         switch self {
         case .playerAEnd: "Player A’s End"
         case .playerBEnd: "Player B’s End"
-        case .side: "Side View"
         case .split: "Split Screen"
         }
     }
@@ -22,8 +20,7 @@ enum CameraView: CaseIterable {
         switch self {
         case .playerAEnd: "1"
         case .playerBEnd: "2"
-        case .side: "3"
-        case .split: "4"
+        case .split: "3"
         }
     }
 }
