@@ -372,7 +372,7 @@ struct ReconnectTests {
 
     @Test func aForfeitTellsThePhoneAndTheViewerWhoWon() throws {
         let harness = SessionHarness(mode: .twoPlayers)
-        let phoneA = harness.addPhone("Phone A", holding: 0.5)
+        _ = harness.addPhone("Phone A", holding: 0.5)
         _ = harness.addPhone("Phone B", holding: 0.5)
         let viewer = harness.addViewer("Studio Mac")
         harness.run(for: 2_000_000)

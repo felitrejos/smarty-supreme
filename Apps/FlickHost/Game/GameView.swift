@@ -144,20 +144,6 @@ struct GameView: View {
     }
 }
 
-extension Side {
-    var playerName: String {
-        self == .playerA ? "Player A" : "Player B"
-    }
-
-    var rubberNSColor: NSColor {
-        self == .playerA ? NSColor(red: 0.12, green: 0.36, blue: 0.86, alpha: 1) : NSColor(red: 0.84, green: 0.16, blue: 0.16, alpha: 1)
-    }
-
-    var rubberColor: Color {
-        Color(nsColor: rubberNSColor)
-    }
-}
-
 extension View {
     @ViewBuilder
     func glassPanel(_ shape: some Shape) -> some View {

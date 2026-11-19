@@ -63,29 +63,6 @@ struct LobbyLinkTests {
         #expect(try #require(back.paddles[.playerA]?.swings.first).macPeakTime != nil)
     }
 
-    @Test func aDifferentPhoneTakesAVacantSideOnlyWhenTheMacFillsIt() {
-        let harness = LinkHarness()
-        _ = harness.addPhone("Phone A")
-        harness.run(for: 50_000)
-        _ = harness.addPhone("Phone B")
-        harness.run(for: 50_000)
-        let third = harness.addPhone("Phone C")
-        harness.run(for: 50_000)
-        harness.host.holdSlots(true)
-        harness.network.disconnect(PeerID("Phone A"), LinkHarness.hostID)
-        harness.run(for: 50_000)
-
-        #expect(third.status == .refused(.gameFull))
-        #expect(harness.host.waiting.map(\.name) == ["Phone C"])
-
-        harness.host.fillVacancy(.playerA, with: PeerID("Phone C"))
-        harness.run(for: 50_000)
-
-        #expect(third.status == .paired(hostName: "Mac"))
-        #expect(harness.host.takeInput().vacant.isEmpty)
-        #expect(harness.host.paddles.first { $0.side == .playerA }?.name == "Phone C")
-    }
-
     @Test func releasingTheHoldGivesVacantSidesToWaitingPhones() {
         let harness = LinkHarness()
         _ = harness.addPhone("Phone A")

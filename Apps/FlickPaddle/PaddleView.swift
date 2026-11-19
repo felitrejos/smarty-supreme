@@ -84,7 +84,7 @@ private struct MatchPanel: View {
         VStack(spacing: 12) {
             HStack(spacing: 8) {
                 Capsule()
-                    .fill(state.side.color)
+                    .fill(state.side.rubberColor)
                     .frame(width: 18, height: 4)
                 Text("You’re \(state.side.playerName)")
                     .font(.headline)
@@ -174,16 +174,6 @@ private struct MatchPanel: View {
                 .buttonStyle(.bordered)
                 .controlSize(.large)
         }
-    }
-}
-
-private extension Side {
-    var playerName: String {
-        self == .playerA ? "Player A" : "Player B"
-    }
-
-    var color: Color {
-        self == .playerA ? Color(red: 0.12, green: 0.36, blue: 0.86) : Color(red: 0.84, green: 0.16, blue: 0.16)
     }
 }
 

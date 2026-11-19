@@ -25,14 +25,13 @@ struct DatasetSummaryTests {
         #expect(summary.stillTime == 100_000)
     }
 
-    @Test func isCompleteOnlyWhenEveryTargetIsMet() {
+    @Test func nothingIsShortOnlyWhenEveryTargetIsMet() {
         var recordings = completeDataset()
-        #expect(DatasetSummary(recordings: recordings).isComplete)
+        #expect(DatasetSummary(recordings: recordings).shortfalls.isEmpty)
 
         recordings[0] = makeRecording(activity: .swings(.forehand, .soft), swings: (1...16).map { $0 })
         let summary = DatasetSummary(recordings: recordings)
 
-        #expect(!summary.isComplete)
         #expect(summary.shortfalls == [.swings(SwingCell(participant: 1, stroke: .forehand, strength: .soft), have: 16)])
     }
 

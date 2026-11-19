@@ -10,7 +10,6 @@ public final class HostLink: Sendable {
     public struct ReceivedSwing: Equatable, Sendable {
         public let macPeakTime: Microseconds?
         public let strength: Double
-        public let direction: SIMD3<Double>
     }
 
     public struct PaddleInput: Equatable, Sendable {
@@ -37,7 +36,6 @@ public final class HostLink: Sendable {
         public let position: Double?
         public let pointerRate: Int
         public let roundTrips: [Microseconds]
-        public let peerAheadOfMac: Int64?
         public let swingCount: Int
         public let lastSwing: ReceivedSwing?
         public let isReady: Bool
@@ -131,7 +129,6 @@ public final class HostLink: Sendable {
                         position: paddle.position,
                         pointerRate: paddle.pointerArrivals.filter { $0 + Self.pointerRateWindow > now }.count,
                         roundTrips: paddle.roundTrips,
-                        peerAheadOfMac: paddle.clockSync.peerAheadOfMac,
                         swingCount: paddle.swingCount,
                         lastSwing: paddle.lastSwing,
                         isReady: paddle.isReady
@@ -320,8 +317,7 @@ public final class HostLink: Sendable {
         case .swing(let swing):
             let received = ReceivedSwing(
                 macPeakTime: paddle.clockSync.macTime(forPeerTime: swing.peakAt),
-                strength: Double(swing.strength),
-                direction: SIMD3<Double>(swing.direction)
+                strength: Double(swing.strength)
             )
             paddle.swingCount += 1
             paddle.lastSwing = received

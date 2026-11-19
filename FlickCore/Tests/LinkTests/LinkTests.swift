@@ -78,7 +78,6 @@ struct LinkTests {
         harness.run(for: 3_000_000)
 
         let paddle = try #require(harness.host.paddles.first)
-        #expect(paddle.peerAheadOfMac == Int64(phoneAhead))
         #expect(paddle.roundTrips.allSatisfy { $0 == 40_000 })
         #expect(paddle.roundTrips.count >= 3)
 
@@ -176,7 +175,6 @@ struct LinkTests {
 
         let paddle = try #require(harness.host.paddles.first)
         #expect(paddle.roundTrips.isEmpty)
-        #expect(paddle.peerAheadOfMac == nil)
     }
 
     @Test(arguments: [0 as Microseconds, UInt64.max])

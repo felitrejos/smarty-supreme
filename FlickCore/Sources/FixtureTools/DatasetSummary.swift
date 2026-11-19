@@ -59,10 +59,6 @@ public struct DatasetSummary: Sendable {
         let stillShortfall: [Shortfall] = stillTime < Self.stillTarget ? [.still(have: stillTime)] : []
         return swingShortfalls + nonSwingShortfalls + stillShortfall
     }
-
-    public var isComplete: Bool {
-        shortfalls.isEmpty
-    }
 }
 
 private func duration(of recording: Recording) -> Microseconds {

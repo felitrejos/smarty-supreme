@@ -154,7 +154,7 @@ final class TableScene {
         lit.addChild(try Equipment.table(materials, width: width))
         lit.addChild(ball)
         for side in Side.allCases {
-            let paddle = try Equipment.paddle(materials, rubber: side.rubberNSColor)
+            let paddle = try Equipment.paddle(materials, rubber: NSColor(side.rubberColor))
             if side == .playerB {
                 paddle.root.orientation = simd_quatf(angle: .pi, axis: [0, 1, 0])
             }

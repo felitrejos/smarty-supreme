@@ -19,7 +19,7 @@ targets:
   FlickPaddle:
     type: application
     platform: iOS
-    sources: [Apps/FlickPaddle, Apps/Shared, Apps/Link]
+    sources: [Apps/FlickPaddle, Apps/Shared, Apps/Link, Apps/Style]
     dependencies:
       - package: FlickCore
     settings:
@@ -53,6 +53,7 @@ targets:
     sources:
       - Apps/FlickHost
       - Apps/Link
+      - Apps/Style
       - path: Assets/Lighting
         buildPhase: resources
       - path: Assets/Sounds
