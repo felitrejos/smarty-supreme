@@ -210,8 +210,8 @@ private struct Pips: View {
     var body: some View {
         Canvas { context, size in
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color))
-            let spacing: CGFloat = 9
-            let radius: CGFloat = 2.6
+            let spacing: CGFloat = 7
+            let radius: CGFloat = 2.05
             var row = 0
             var y: CGFloat = 0
             while y < size.height + spacing {

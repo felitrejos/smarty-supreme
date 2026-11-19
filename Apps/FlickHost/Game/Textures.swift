@@ -178,4 +178,79 @@ enum Textures {
         CTLineDraw(line, context)
         return canvas.image
     }
+
+    struct Advert: Sendable {
+        let words: String
+        let font: String
+        let board: (Double, Double, Double)
+        let ink: (Double, Double, Double)
+    }
+
+    @concurrent
+    static func advert(_ advert: Advert) async -> CGImage {
+        let canvas = Canvas(width: 1024, height: 360)
+        let context = canvas.context
+        context.setFillColor(red: advert.board.0, green: advert.board.1, blue: advert.board.2, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 1024, height: 360))
+        context.setStrokeColor(red: advert.ink.0, green: advert.ink.1, blue: advert.ink.2, alpha: 0.85)
+        context.setLineWidth(6)
+        context.stroke(CGRect(x: 22, y: 22, width: 980, height: 316))
+        let ink = NSColor(red: advert.ink.0, green: advert.ink.1, blue: advert.ink.2, alpha: 1)
+        var size: CGFloat = 170
+        var line: CTLine
+        repeat {
+            let text = NSAttributedString(string: advert.words, attributes: [
+                .font: NSFont(name: advert.font, size: size) ?? NSFont.boldSystemFont(ofSize: size),
+                .foregroundColor: ink,
+                .kern: size * 0.06,
+            ])
+            line = CTLineCreateWithAttributedString(text)
+            size -= 6
+        } while CTLineGetImageBounds(line, context).width > 900
+        let bounds = CTLineGetImageBounds(line, context)
+        context.textPosition = CGPoint(x: (1024 - bounds.width) / 2 - bounds.minX, y: (360 - bounds.height) / 2 - bounds.minY)
+        CTLineDraw(line, context)
+        return canvas.image
+    }
+
+    @concurrent
+    static func rubberWear(seed: UInt64) async -> CGImage {
+        var random = SplitMix64(seed: seed)
+        let canvas = Canvas(width: 512, height: 512)
+        let context = canvas.context
+        context.setFillColor(gray: 1, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 512, height: 512))
+        for _ in 0..<26 {
+            let radius = Double.random(in: 30...120, using: &random)
+            let centre = CGPoint(x: Double.random(in: 0..<512, using: &random), y: Double.random(in: 0..<512, using: &random))
+            let gradient = CGGradient(
+                colorsSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
+                colors: [CGColor(gray: 0.55, alpha: Double.random(in: 0.25...0.6, using: &random)), CGColor(gray: 0.55, alpha: 0)] as CFArray,
+                locations: [0, 1]
+            )!
+            context.drawRadialGradient(gradient, startCenter: centre, startRadius: 0, endCenter: centre, endRadius: radius, options: [])
+        }
+        for _ in 0..<30_000 {
+            context.setFillColor(gray: Double.random(in: 0.7...1, using: &random), alpha: 0.35)
+            context.fill(CGRect(x: Double.random(in: 0..<512, using: &random), y: Double.random(in: 0..<512, using: &random), width: 1.5, height: 1.5))
+        }
+        return canvas.image
+    }
+
+    @concurrent
+    static func makersStamp() async -> CGImage {
+        let canvas = Canvas(width: 512, height: 120)
+        let context = canvas.context
+        context.clear(CGRect(x: 0, y: 0, width: 512, height: 120))
+        let text = NSAttributedString(string: "FLICK · HARDBAT", attributes: [
+            .font: NSFont(name: "Futura-Bold", size: 64) ?? NSFont.boldSystemFont(ofSize: 64),
+            .foregroundColor: NSColor(red: 0.86, green: 0.71, blue: 0.42, alpha: 1),
+            .kern: 6,
+        ])
+        let line = CTLineCreateWithAttributedString(text)
+        let bounds = CTLineGetImageBounds(line, context)
+        context.textPosition = CGPoint(x: (512 - bounds.width) / 2 - bounds.minX, y: (120 - bounds.height) / 2 - bounds.minY)
+        CTLineDraw(line, context)
+        return canvas.image
+    }
 }

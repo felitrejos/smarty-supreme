@@ -18,9 +18,11 @@ enum Equipment {
         static let bladeThickness: Float = 0.0058
         static let rubberThickness: Float = 0.0015
         static let handleLength: Float = 0.1
+        static let grip: Float = 0.13
+        static let pipRepeats: Float = 4.5
         static let floorRadius: Float = 16
         static let courtLength: Float = 12
-        static let courtWidth: Float = 6.5
+        static let courtWidth: Float = 8.4
         static let surroundHeight: Float = 0.7
         static let surroundPanel: Float = 2
         static let fillIntensity: Float = 420
@@ -41,17 +43,22 @@ enum Equipment {
         let frame: PhysicallyBasedMaterial
         let apron: PhysicallyBasedMaterial
         let surround: PhysicallyBasedMaterial
+        let adverts: [PhysicallyBasedMaterial]
         let blade: PhysicallyBasedMaterial
         let floor: PhysicallyBasedMaterial
         let fog: UnlitMaterial
         let iron: PhysicallyBasedMaterial
         let pips: TextureResource
+        let wear: TextureResource
+        let stamp: PhysicallyBasedMaterial
         let net: PhysicallyBasedMaterial
         let shadow: UnlitMaterial
 
         static func make(tableWidth: Float) async throws -> Materials {
             async let topImage = Textures.tableTop(widthMetres: Double(tableWidth), seed: 7)
             async let pipsImage = Textures.pimpledRubber()
+            async let wearImage = Textures.rubberWear(seed: 12)
+            async let stampImage = Textures.makersStamp()
             async let netImage = Textures.netMesh(cellsAcross: 122, cellsDown: 10)
             async let shadowImage = Textures.softShadow()
             async let fogImage = Textures.floorFog()
@@ -77,6 +84,13 @@ enum Equipment {
             surround.baseColor = .init(tint: Tone.surround)
             surround.clearcoat = 0.7
             surround.clearcoatRoughness = 0.35
+            var adverts: [PhysicallyBasedMaterial] = []
+            for advert in Self.adverts {
+                var board = surround
+                board.baseColor = .init(texture: .init(try await Textures.texture(await Textures.advert(advert), .color)))
+                board.textureCoordinateTransform = .init()
+                adverts.append(board)
+            }
 
             let floor = try await Textures.surface("old_wooden_floor_02", repeats: Size.floorRadius)
 
@@ -104,22 +118,45 @@ enum Equipment {
                 frame: frame,
                 apron: apron,
                 surround: surround,
+                adverts: adverts,
                 blade: blade,
                 floor: floor,
                 fog: fog,
                 iron: iron,
                 pips: try await Textures.texture(await pipsImage, .normal),
+                wear: try await Textures.texture(await wearImage, .color),
+                stamp: try await stampMaterial(await stampImage),
                 net: net,
                 shadow: shadow
             )
         }
 
+        private static let adverts = [
+            Textures.Advert(words: "JAQUES · LONDON", font: "Futura-Bold", board: (0.09, 0.13, 0.2), ink: (0.93, 0.88, 0.76)),
+            Textures.Advert(words: "HALEX", font: "Futura-CondensedExtraBold", board: (0.55, 0.1, 0.08), ink: (0.96, 0.9, 0.78)),
+            Textures.Advert(words: "DUNLOP", font: "Futura-CondensedExtraBold", board: (0.88, 0.75, 0.3), ink: (0.12, 0.1, 0.08)),
+            Textures.Advert(words: "Guinness is good for you", font: "Didot-Bold", board: (0.08, 0.07, 0.06), ink: (0.88, 0.8, 0.6)),
+            Textures.Advert(words: "SLAZENGER", font: "GillSans-Bold", board: (0.12, 0.25, 0.18), ink: (0.95, 0.9, 0.78)),
+            Textures.Advert(words: "BOVRIL", font: "Futura-CondensedExtraBold", board: (0.88, 0.84, 0.74), ink: (0.6, 0.1, 0.08)),
+            Textures.Advert(words: "BARNA BATS", font: "GillSans-UltraBold", board: (0.09, 0.13, 0.2), ink: (0.86, 0.71, 0.42)),
+            Textures.Advert(words: "SCHWEPPES", font: "Didot-Bold", board: (0.9, 0.82, 0.45), ink: (0.1, 0.1, 0.12)),
+        ]
+
+        private static func stampMaterial(_ image: CGImage) async throws -> PhysicallyBasedMaterial {
+            var stamp = PhysicallyBasedMaterial()
+            stamp.baseColor = .init(texture: .init(try await Textures.texture(image, .color)))
+            stamp.metallic = 0.6
+            stamp.roughness = 0.45
+            stamp.opacityThreshold = 0.4
+            return stamp
+        }
+
         func rubber(_ color: NSColor) -> PhysicallyBasedMaterial {
             var rubber = PhysicallyBasedMaterial()
-            rubber.baseColor = .init(tint: color)
+            rubber.baseColor = .init(tint: color, texture: .init(wear))
             rubber.normal = .init(texture: .init(pips))
-            rubber.textureCoordinateTransform = .init(scale: [3, 3])
-            rubber.roughness = 0.7
+            rubber.textureCoordinateTransform = .init(scale: [Size.pipRepeats, Size.pipRepeats])
+            rubber.roughness = 0.74
             return rubber
         }
     }
@@ -191,6 +228,7 @@ enum Equipment {
         let surrounds = Entity()
         let halfLength = Size.courtLength / 2
         let halfWidth = Size.courtWidth / 2
+        var next = 0
         func run(from start: SIMD2<Float>, to end: SIMD2<Float>) {
             let span = simd_distance(start, end)
             let panels = Int((span / Size.surroundPanel).rounded(.up))
@@ -198,7 +236,12 @@ enum Equipment {
             let length = span / Float(panels)
             for index in 0..<panels {
                 let centre = start + direction * (Float(index) + 0.5) * length
-                let panel = ModelEntity(mesh: .generateBox(width: length - 0.03, height: Size.surroundHeight, depth: 0.04, cornerRadius: 0.004), materials: [materials.surround])
+                let advert = materials.adverts[next % materials.adverts.count]
+                next += 1
+                let panel = ModelEntity(
+                    mesh: .generateBox(width: length - 0.03, height: Size.surroundHeight, depth: 0.04, cornerRadius: 0.004, splitFaces: true),
+                    materials: [advert, materials.surround, advert, materials.surround, materials.surround, materials.surround]
+                )
                 panel.position = [centre.x, Size.surroundHeight / 2, centre.y]
                 panel.orientation = simd_quatf(angle: atan2(-direction.y, direction.x), axis: [0, 1, 0])
                 let rail = ModelEntity(mesh: .generateBox(width: length - 0.02, height: 0.03, depth: 0.06, cornerRadius: 0.006), materials: [materials.frame])
@@ -279,7 +322,7 @@ enum Equipment {
     static func paddle(_ materials: Materials, rubber color: NSColor) throws -> (root: Entity, pivot: Entity) {
         let root = Entity()
         let pivot = Entity()
-        let grip: Float = 0.13
+        let grip = Size.grip
         pivot.position.y = -grip
         root.addChild(pivot)
 
@@ -299,6 +342,16 @@ enum Equipment {
         let back = ModelEntity(mesh: sheet, materials: [materials.rubber(color)])
         blade.addChild(front)
         blade.addChild(back)
+        let surface = halfCore + Size.rubberThickness + 0.0003
+        for face: Float in [-1, 1] {
+            let stamp = ModelEntity(mesh: .generatePlane(width: 0.06, height: 0.014), materials: [materials.stamp])
+            stamp.position = [0, -Size.bladeHeight / 2 + 0.03, face * surface]
+            stamp.orientation = simd_quatf(angle: face < 0 ? .pi : 0, axis: [0, 1, 0])
+            blade.addChild(stamp)
+            let cheek = ModelEntity(mesh: .generateBox(width: 0.034, height: 0.032, depth: 0.004, cornerRadius: 0.0015), materials: [materials.frame])
+            cheek.position = [0, -Size.bladeHeight / 2 - 0.004, face * (halfCore + 0.002)]
+            blade.addChild(cheek)
+        }
 
         let handle = ModelEntity(
             mesh: try Geometry.loftedHandle(length: Size.handleLength) { t in

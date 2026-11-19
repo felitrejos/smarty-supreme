@@ -103,13 +103,6 @@ final class TableScene {
         static let bounceAt: Float = 0.7
     }
 
-    private enum Swing {
-        static let duration: TimeInterval = 0.28
-        static let strikeShare = 0.3
-        static let tilt: Float = 0.95
-        static let whiffStrength = 0.3
-    }
-
     private enum Impact {
         static let glowDuration: TimeInterval = 0.18
         static let glowGrowth: Float = 3
@@ -118,11 +111,6 @@ final class TableScene {
         static let trailOpacity: Float = 0.3
         static let trailFromSpeed = 0.7
         static let trailFullSpeed = 1.5
-    }
-
-    private struct SwingState {
-        var elapsed: TimeInterval
-        let strength: Double
     }
 
     private static let dimmedOpacity: Float = 0.35
@@ -135,10 +123,10 @@ final class TableScene {
     private static let rigSpots: [SIMD2<Float>] = [[0, 0], [-1.6, -2.6], [1.6, -2.6], [-1.6, 2.6], [1.6, 2.6]]
     private static let umpireTable: SIMD3<Float> = [-1.75, 0, 0]
     private static let courtChairs: [(SIMD3<Float>, Float)] = [([-2.6, 0, 5.2], .pi * 0.85), ([2.6, 0, -5.2], -.pi * 0.15)]
-    private static let paddleFollow: Float = 14
-    private static let paddleRollPerSpeed: Float = 0.12
-    private static let maximumRoll: Float = 0.35
-    private static let paddleLiftPerSpeed: Float = 0.025
+    private static let whiffStrength = 0.3
+    private static let paddleRollPerSpeed: Float = 0.08
+    private static let maximumRoll: Float = 0.3
+    private static let paddleLiftPerSpeed: Float = 0.02
 
     let root = Entity()
     private let camera = PerspectiveCamera()
@@ -148,11 +136,10 @@ final class TableScene {
     private let sounds: SoundBoard
     private let crowd: Crowd
     private var paddles: [(side: Side, root: Entity, pivot: Entity)] = []
-    private var paddleX: [Side: Float] = [:]
+    private var motions: [Side: PaddleMotion] = [:]
     private var scoreCards: [Side: ModelEntity] = [:]
     private var shownScore: Score?
     private var cardMaterials: [Int: PhysicallyBasedMaterial] = [:]
-    private var swings: [Side: SwingState] = [:]
     private var glowElapsed: TimeInterval?
     private var ballTrail: [SIMD3<Float>] = []
     private var lastProgress: Float?
@@ -245,7 +232,7 @@ final class TableScene {
         let arc = arc(for: pose)
         let ballPosition: SIMD3<Float> = [sceneX(pose.ball.x), Size.tableHeight + arc.height, sceneZ(pose.ball.y)]
         for contact in pose.contacts {
-            swings[contact.side] = SwingState(elapsed: 0, strength: contact.isWhiff ? Swing.whiffStrength : contact.strength)
+            motions[contact.side]?.hit(strength: Float(contact.isWhiff ? Self.whiffStrength : contact.strength))
             if !contact.isWhiff {
                 sounds.play(.paddle(strength: contact.strength), pan: pan(at: pose.ball))
                 glowElapsed = 0
@@ -267,14 +254,19 @@ final class TableScene {
             let side = paddle.side
             let behind = side == .playerA ? Self.paddleBehindFace : -Self.paddleBehindFace
             let target = sceneX(pose.paddleX(of: side))
-            let previous = paddleX[side] ?? target
-            let x = previous + (target - previous) * (1 - exp(-Self.paddleFollow * seconds))
-            paddleX[side] = x
-            let speed = (x - previous) / seconds * (side == .playerA ? 1 : -1)
+            var motion = motions[side] ?? PaddleMotion(x: target)
+            let toward: Double = side == .playerA ? -1 : 1
+            let approaching = pose.isRally && pose.velocity.y * toward > 0
+            let secondsToContact = approaching ? Float((config.paddleFaceY(of: side) - pose.ball.y) / pose.velocity.y) : nil
+            let across = (sceneX(pose.ball.x) - motion.x) * (side == .playerA ? 1 : -1)
+            motion.update(target: target, ballAcross: across, secondsToContact: secondsToContact, elapsed: seconds)
+            motions[side] = motion
+            let speed = motion.lateralSpeed * (side == .playerA ? 1 : -1)
             let roll = min(max(speed * Self.paddleRollPerSpeed, -Self.maximumRoll), Self.maximumRoll)
-            paddle.root.position = [x, Size.tableHeight + Arc.paddleHeight + abs(speed) * Self.paddleLiftPerSpeed, sceneZ(config.paddleFaceY(of: side)) + behind]
-            let swing = simd_quatf(angle: -swingAngle(side, elapsed: elapsed), axis: [1, 0, 0])
-            paddle.pivot.orientation = simd_quatf(angle: -lean(of: side, in: pose) - roll, axis: [0, 0, 1]) * swing
+            let pose3 = motion.pose()
+            paddle.root.position = [motion.x, Size.tableHeight + Arc.paddleHeight + abs(speed) * Self.paddleLiftPerSpeed, sceneZ(config.paddleFaceY(of: side)) + behind]
+            paddle.pivot.position = SIMD3(0, -Size.grip, 0) + pose3.offset
+            paddle.pivot.orientation = simd_quatf(angle: -lean(of: side, in: pose) - roll, axis: [0, 0, 1]) * pose3.orientation
             paddle.root.components.set(OpacityComponent(opacity: pose.dimmed.contains(side) ? Self.dimmedOpacity : 1))
         }
         ball.position = ballPosition
@@ -310,21 +302,6 @@ final class TableScene {
         let tablePosition = config.position(ofPaddleX: pose.paddleX(of: side))
         let ownPosition = side == .playerA ? tablePosition : 1 - tablePosition
         return Float(ownPosition - 0.5) * 2 * Self.maximumLean
-    }
-
-    private func swingAngle(_ side: Side, elapsed: TimeInterval) -> Float {
-        guard var swing = swings[side] else { return 0 }
-        swing.elapsed += elapsed
-        guard swing.elapsed < Swing.duration else {
-            swings[side] = nil
-            return 0
-        }
-        swings[side] = swing
-        let progress = swing.elapsed / Swing.duration
-        let shape = progress < Swing.strikeShare
-            ? sin(.pi / 2 * progress / Swing.strikeShare)
-            : 0.5 * (1 + cos(.pi * (progress - Swing.strikeShare) / (1 - Swing.strikeShare)))
-        return Swing.tilt * Float(shape * (0.7 + 0.6 * swing.strength))
     }
 
     private func updateGlow(at position: SIMD3<Float>, elapsed: TimeInterval) {
