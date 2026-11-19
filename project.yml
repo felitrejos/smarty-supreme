@@ -2,7 +2,7 @@ name: FlickPong
 options:
   deploymentTarget:
     iOS: "18.0"
-    macOS: "15.0"
+    macOS: "26.0"
   createIntermediateGroups: true
 settings:
   base:

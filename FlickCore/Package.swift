@@ -1,9 +1,9 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "FlickCore",
-    platforms: [.iOS(.v18), .macOS(.v15)],
+    platforms: [.iOS(.v18), .macOS(.v26)],
     products: [
         .library(name: "FlickCore", targets: ["FlickCore"]),
         .library(name: "FlickTestSupport", targets: ["FlickTestSupport"]),

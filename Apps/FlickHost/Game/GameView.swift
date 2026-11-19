@@ -62,7 +62,7 @@ struct GameView: View {
             } else if let failure = stage.failure {
                 Text(failure)
                     .padding(16)
-                    .glassPanel(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .glassEffect(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         }
         .overlay(alignment: .bottom) {
@@ -158,17 +158,6 @@ struct GameView: View {
     }
 }
 
-extension View {
-    @ViewBuilder
-    func glassPanel(_ shape: some Shape) -> some View {
-        if #available(macOS 26.0, *) {
-            glassEffect(.regular, in: shape)
-        } else {
-            background(.regularMaterial, in: shape)
-        }
-    }
-}
-
 struct Scoreboard: View {
     let score: Score
     let server: Side?
@@ -186,7 +175,7 @@ struct Scoreboard: View {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
-        .glassPanel(Capsule())
+        .glassEffect(in: Capsule())
         .animation(.snappy, value: score)
     }
 
@@ -242,7 +231,7 @@ private struct WinnerCard: View {
         }
         .padding(.horizontal, 36)
         .padding(.vertical, 26)
-        .glassPanel(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .glassEffect(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 }
 
@@ -265,7 +254,7 @@ private struct ControlsHint: View {
         .font(.callout)
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
-        .glassPanel(Capsule())
+        .glassEffect(in: Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Side.allCases.map(spokenHint).joined(separator: " "))
     }
@@ -382,7 +371,7 @@ private struct FrameTimes: View {
         .monospacedDigit()
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .glassPanel(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .glassEffect(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var meetsBudget: Bool {

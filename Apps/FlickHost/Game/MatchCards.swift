@@ -33,7 +33,7 @@ struct LobbyCard: View {
             }
             .padding(24)
             .frame(width: 440)
-            .glassPanel(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .glassEffect(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
     }
 
@@ -138,7 +138,7 @@ struct InterruptionCard: View {
             .padding(.horizontal, 32)
             .padding(.vertical, 24)
             .frame(maxWidth: 420)
-            .glassPanel(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .glassEffect(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
     }
 

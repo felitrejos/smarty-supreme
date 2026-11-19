@@ -7,7 +7,7 @@ An iPhone is the paddle, a Mac is the table. Tilt the phone to move your paddle 
 | Path | What it is |
 | --- | --- |
 | `FlickCore/` | Swift package with all hardware-free logic: swing detection and paddle mapping, the binary protocol and links, the 240 Hz game engine, the computer opponent, the match session (lobby, pauses, reconnects) and the second-Mac viewer. `FlickTestSupport` holds the fakes (`ManualClock`, `LoopbackNetwork`). `FixtureTools` and the `flick-fixtures` command check and split the motion dataset. |
-| `Apps/FlickHost/` | Mac app (macOS 15+): the 3D table, keyboard input, sound, and the iPhone Paddles window. It can also act as Player B's screen for another Mac. |
+| `Apps/FlickHost/` | Mac app (macOS 26+): the 3D table, keyboard input, sound, and the iPhone Paddles window. It can also act as Player B's screen for another Mac. |
 | `Apps/FlickPaddle/` | iPhone paddle (iOS 18+): pairs with the Mac, calibrates, sends tilt at 60 Hz and swings as they happen, and plays haptics |
 | `Apps/FlickRecorder/` | iPhone app that records labelled motion data for the swing detector |
 | `Apps/Shared/` | Core Motion wrapper shared by the iPhone apps |

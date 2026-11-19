@@ -9,7 +9,7 @@ The Mac is a window onto one object: the table. Everything else stays out of the
 | The table alone in the window, floating in a charcoal space lighter behind it and darker at the edges | Apple Chess (macOS), studied on this Mac | No floor or horizon; a soft vertical gradient backdrop; the object fills the frame from an elevated three-quarter view |
 | Game state in the window title ("Flick Pong – Player A to serve") | Apple Chess window title ("White to Move") | Status lives in the title bar, not in an on-screen banner |
 | Actions in the menu bar: New Game ⌘N, Pause Esc, cameras ⌘1–3, iPhone Paddles ⌘0, Show Frame Times ⌥⌘F | Apple Chess Game / View / Moves menus | Nothing on screen that a menu can hold |
-| One Liquid Glass scoreboard; controls hint only at the start of a game and while paused | Apple's Liquid Glass material (macOS 26), with a regular material on macOS 15–25 | One floating control surface, system material, system font with rounded tabular figures |
+| One Liquid Glass scoreboard; controls hint only at the start of a game and while paused | Apple's Liquid Glass material | One floating control surface, system material, system font with rounded tabular figures |
 | Player colour shown only as the paddle's rubber colour (blue for A, red for B) | Real table tennis rubbers | Colour carries meaning once: which paddle is whose |
 | Studio lighting from an HDRI with one soft key light for shadows | Poly Haven `studio_small_09` (CC0), in `Assets/Lighting` | Soft softbox reflections on aluminium, rubber and the table's clear coat |
 | Sculptural curved base under the table | "ping pong" by alixor22 on Sketchfab (CC BY 4.0), shape reference only | The silhouette idea of two swept supports; the geometry is our own, built in `Geometry.swift` |

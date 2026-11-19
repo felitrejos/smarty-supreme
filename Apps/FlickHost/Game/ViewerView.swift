@@ -45,7 +45,7 @@ struct ViewerView: View {
                 .padding(.horizontal, 32)
                 .padding(.vertical, 22)
                 .frame(maxWidth: 420)
-                .glassPanel(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .glassEffect(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
         }
         .overlay(alignment: .bottomTrailing) {
@@ -59,7 +59,7 @@ struct ViewerView: View {
                 .monospacedDigit()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .glassPanel(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .glassEffect(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .padding(16)
             }
         }
