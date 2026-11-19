@@ -5,7 +5,7 @@ import RealityKit
 @MainActor
 enum Equipment {
     enum Size {
-        static let metresPerTableLength: Float = 2.74
+        static let tableLength: Float = 2.74
         static let tableHeight: Float = 0.76
         static let topThickness: Float = 0.025
         static let apronDepth: Float = 0.07
@@ -182,14 +182,14 @@ enum Equipment {
     }
 
     static func contactShadow(_ materials: Materials, width: Float) -> Entity {
-        let shadow = ModelEntity(mesh: .generatePlane(width: width * 1.7, depth: Size.metresPerTableLength * 1.2), materials: [materials.shadow])
+        let shadow = ModelEntity(mesh: .generatePlane(width: width * 1.7, depth: Size.tableLength * 1.2), materials: [materials.shadow])
         shadow.position.y = 0.001
         return shadow
     }
 
     static func table(_ materials: Materials, width: Float) -> Entity {
         let table = Entity()
-        let length = Size.metresPerTableLength
+        let length = Size.tableLength
         let top = ModelEntity(
             mesh: .generateBox(width: width, height: Size.topThickness, depth: length, cornerRadius: 0.003, splitFaces: true),
             materials: [materials.frame, materials.top, materials.frame, materials.frame, materials.frame, materials.frame]

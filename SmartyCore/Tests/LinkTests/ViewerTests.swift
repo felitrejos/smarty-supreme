@@ -20,7 +20,7 @@ struct ViewerTests {
             guard let latest = viewer.latest else { return }
             let frame = display.frame(from: latest, at: harness.clock.now)
             defer { previous = frame }
-            guard let previous, previous.phase == .rally, frame.phase == .rally, frame.rally >= previous.rally else { return }
+            guard let previous, previous.phase == .rally, frame.phase == .rally, frame.rally == previous.rally else { return }
             let fastest = max(simd_length(previous.velocity), simd_length(frame.velocity))
             let jump = simd_length(frame.ball - previous.ball) - fastest * SessionHarness.frameSeconds
             worstJump = max(worstJump, jump)

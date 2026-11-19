@@ -35,8 +35,12 @@ final class Crowd {
 
     let root = Entity()
     private var spectators: [Spectator] = []
+    private var shown: [Int] = []
+    private static let idleBatches = 3
+
     private var time: Float = 0
     private var cheerStartedAt: Float?
+    private var frame = 0
 
     func update(elapsed: TimeInterval, cheer: Bool) {
         time += Float(elapsed)
@@ -44,7 +48,10 @@ final class Crowd {
             cheerStartedAt = time
         }
         let sinceCheer = cheerStartedAt.map { time - $0 }
-        for spectator in spectators {
+        frame += 1
+        let batch = frame % Self.idleBatches
+        for index in shown where sinceCheer != nil || index % Self.idleBatches == batch {
+            let spectator = spectators[index]
             var position = spectator.rest
             let idle = time * spectator.rate + spectator.phase
             position.y += sin(idle) * Self.breathe
@@ -126,6 +133,28 @@ final class Crowd {
         standMaterial.baseColor = .init(tint: Self.stand)
         standMaterial.roughness = 0.9
         root.addChild(ModelEntity(mesh: try tiers.mesh(named: "stands"), materials: [standMaterial]))
+        showAll()
+    }
+
+    func showAll() {
+        shown = Array(spectators.indices)
+        for spectator in spectators {
+            spectator.card.isEnabled = true
+        }
+    }
+
+    func show(onlyWhatIsSeenFrom eye: SIMD3<Float>, looking forward: SIMD3<Float>, within halfAngle: Float) {
+        let ahead = simd_normalize(SIMD2(forward.x, forward.z))
+        let edge = cos(halfAngle)
+        shown = []
+        for (index, spectator) in spectators.enumerated() {
+            let offset = SIMD2(spectator.rest.x - eye.x, spectator.rest.z - eye.z)
+            let isSeen = simd_dot(simd_normalize(offset), ahead) >= edge
+            spectator.card.isEnabled = isSeen
+            if isSeen {
+                shown.append(index)
+            }
+        }
     }
 }
 

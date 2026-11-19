@@ -51,7 +51,7 @@ final class PaddleController {
             motion.start(onSample: forwardSample, onError: sensing.reportSensorError)
         } else {
             sensing.setTouchPosition(Self.touchStartPosition)
-            link.announceCalibration(sensing.snapshot.sensitivity)
+            link.announceCalibration()
         }
         pointerTimer = makePointerTimer()
         haptics.prepare()
@@ -94,11 +94,11 @@ final class PaddleController {
     private var forwardSample: @Sendable (MotionSample) -> Void {
         { [sensing, link] sample in
             let outcome = sensing.process(sample)
-            if let swing = outcome.swing {
-                link.sendSwing(swing)
+            if let pose = outcome.pose {
+                link.sendRacket(pose, at: sample.time)
             }
-            if let sensitivity = outcome.calibratedWith {
-                link.announceCalibration(sensitivity)
+            if outcome.didCalibrate {
+                link.announceCalibration()
             }
         }
     }

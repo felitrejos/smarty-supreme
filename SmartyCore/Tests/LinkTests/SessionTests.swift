@@ -515,7 +515,7 @@ final class SessionHarness {
         holdings[name] = position
         run(for: 50_000)
         if calibrated {
-            phone.announceCalibration(.medium)
+            phone.announceCalibration()
         }
         return phone
     }
@@ -606,14 +606,12 @@ struct PhoneBot {
         case .serving(side, let since) where servedFor != since:
             servedFor = since
             phone.sendSwing(swing(at: now))
-        case .rally where game.ball.velocity.y * (side == .playerA ? -1 : 1) > 0:
-            let path = BallPath(ball: game.ball, config: config)
-            let face = config.paddleFaceY(of: side)
-            let zoneMiddle = face + (side == .playerA ? 1 : -1) * config.zoneDepth(forSpeed: game.ball.speed) / 2
-            if let seconds = path.secondsUntil(y: zoneMiddle) {
-                target = config.position(ofPaddleX: path.position(after: seconds).x)
+        case .rally:
+            if let contact = game.predictedContact(for: side) {
+                let seconds = Double(contact.stepsAway) / Double(config.stepsPerSecond)
+                target = config.position(ofPaddleX: contact.position.x)
                 let shot = (game.score.a + game.score.b) * 1_000 + game.rally
-                if seconds < SessionHarness.frameSeconds, lastShot != shot {
+                if seconds <= SessionHarness.frameSeconds + 0.5 / Double(config.stepsPerSecond), lastShot != shot {
                     lastShot = shot
                     if Double.random(in: 0..<1, using: &random) >= missRate {
                         phone.sendSwing(swing(at: now + Microseconds(seconds * 1_000_000)))

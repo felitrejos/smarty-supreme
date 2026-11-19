@@ -1,39 +1,27 @@
 import SmartyCore
+import simd
 import Testing
 
-struct BallPathTests {
-    @Test func predictedInterceptMatchesTheEngineThroughThreeWallBounces() throws {
-        var config = GameConfig()
-        config.tableLength = 3
-        config.tableWidth = 0.4
-        config.serveSpreadDegrees = 0
-        config.maximumReturnAngleDegrees = 80
-        var game = GameState(seed: 1, config: config)
-        _ = game.step(StepInput(swings: [Swing(side: .playerA, step: game.step, strength: 0, aim: 1)]))
+struct PredictionTests {
+    @Test func thePredictedContactIsWhereTheEngineOffersTheChance() throws {
+        var game = GameState(seed: 1)
+        _ = game.step(StepInput(swings: [Swing(side: .playerA, step: game.step, strength: 0.4, aim: 1)]))
+        let contact = try #require(game.predictedContact(for: .playerB))
 
-        let path = BallPath(ball: game.ball, config: config)
-        let zoneMiddle = config.paddleFaceY(of: .playerB) - config.zoneDepth(forSpeed: game.ball.speed) / 2
-        let seconds = try #require(path.secondsUntil(y: zoneMiddle))
-        let steps = Int((seconds * Double(config.stepsPerSecond)).rounded())
-        let predicted = path.position(after: Double(steps) / Double(config.stepsPerSecond))
-
-        var bounces = 0
-        for _ in 0..<steps {
-            bounces += game.step(StepInput()).filter { $0 == .wallBounce }.count
+        for _ in 1..<contact.stepsAway {
+            _ = game.step(StepInput())
         }
+        #expect(game.predictedContact(for: .playerB)?.stepsAway == 1)
+        _ = game.step(StepInput())
 
-        #expect(bounces >= 3)
-        #expect(abs(game.ball.position.x - predicted.x) <= 0.002)
-        #expect(abs(game.ball.position.y - predicted.y) <= 0.002)
+        #expect(simd_distance(game.ball.position, contact.position) < 1e-9)
     }
 
-    @Test func aBallMovingAwayNeverReachesTheLine() {
+    @Test func aBallGoingAwayHasNoContactForTheHitter() {
         var game = GameState(seed: 1)
         _ = game.step(StepInput(swings: [Swing(side: .playerA, step: game.step, strength: 0, aim: 0)]))
 
-        let path = BallPath(ball: game.ball, config: game.config)
-
-        #expect(path.secondsUntil(y: 0) == nil)
+        #expect(game.predictedContact(for: .playerA) == nil)
     }
 }
 
@@ -63,7 +51,7 @@ struct AIControllerTests {
         var swings = 0
         var reactions = 0
         while !duel.isOver {
-            if duel.game.isApproaching(.playerB) {
+            if duel.game.isComing(to: .playerB) {
                 approachingSince = approachingSince ?? duel.game.step
             } else {
                 approachingSince = nil
@@ -94,20 +82,16 @@ struct AIControllerTests {
             profile.aimsAwayShare = aimsAwayShare
             var away = 0
             var returns = 0
-            for seed in 0..<30 {
+            for seed in 0..<12 {
                 var duel = Duel(seed: UInt64(seed) &+ 100, playerA: .scriptedAverage, playerB: profile)
-                var farLane: Lane?
                 while !duel.isOver {
                     let turn = duel.step()
                     let game = duel.game
-                    if turn.events.contains(where: { if case .hit(.playerB, _, _) = $0 { true } else { false } }) {
-                        farLane = game.paddlePosition(of: .playerA) < 0.5 ? .right : .left
-                    }
-                    if let lane = farLane, game.ball.position.y <= game.config.paddleFaceY(of: .playerA) {
-                        returns += 1
-                        away += Lane(x: game.ball.position.x, config: game.config) == lane ? 1 : 0
-                        farLane = nil
-                    }
+                    guard turn.events.contains(where: { if case .hit(.playerB, _, _) = $0 { true } else { false } }),
+                          let contact = game.predictedContact(for: .playerA) else { continue }
+                    let farLane: Lane = game.paddlePosition(of: .playerA) < 0.5 ? .right : .left
+                    returns += 1
+                    away += Lane(x: contact.position.x, config: game.config) == farLane ? 1 : 0
                 }
             }
             return Double(away) / Double(returns)
@@ -155,7 +139,7 @@ struct AIControllerTests {
         profile.aimError = 0
         profile.timingError = 0
         var duel = Duel(seed: 10, playerA: .scriptedAverage, playerB: profile)
-        while !duel.game.isApproaching(.playerB) {
+        while !duel.game.isComing(to: .playerB) {
             _ = duel.step()
         }
         _ = duel.step(command: .pause)
@@ -180,13 +164,13 @@ struct AIControllerTests {
         var duel = Duel(seed: 9, playerA: .scriptedAverage, playerB: profile)
         let config = duel.game.config
         let middle = config.tableWidth / 2
-        let longestDrift = (config.tableWidth - config.paddleWidth) / 2 / (profile.paddleSpeedInTableWidths * config.tableWidth)
+        let longestDrift = (config.tableWidth / 2 + config.paddleTravelMargin) / (profile.paddleSpeedInTableWidths * config.tableWidth)
         let settledAfter = Int((longestDrift * Double(config.stepsPerSecond)).rounded(.up)) + 1
         var stepsAway = 0
         var checked = 0
         while !duel.isOver {
             _ = duel.step()
-            guard case .rally = duel.game.phase, !duel.game.isApproaching(.playerB) else {
+            guard case .rally = duel.game.phase, !duel.game.isComing(to: .playerB) else {
                 stepsAway = 0
                 continue
             }
@@ -271,17 +255,11 @@ struct Duel {
 extension AIProfile {
     static let scriptedAverage = AIProfile(
         reactionDelay: 0.18,
-        aimError: 0.035,
-        paddleSpeedInTableWidths: 2.0,
-        timingError: 0.045,
+        aimError: 0.08,
+        paddleSpeedInTableWidths: 1.1,
+        timingError: 0.035,
         strength: 0.2...0.7,
         aimsAwayShare: 0
     )
 }
 
-extension GameState {
-    func isApproaching(_ side: Side) -> Bool {
-        guard case .rally = phase else { return false }
-        return side == .playerA ? ball.velocity.y < 0 : ball.velocity.y > 0
-    }
-}

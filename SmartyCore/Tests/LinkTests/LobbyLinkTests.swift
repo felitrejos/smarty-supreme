@@ -136,7 +136,7 @@ struct LobbyLinkTests {
         let viewer = harness.addRawPeer("Studio Mac")
         try viewer.send(.viewerHello(name: "Studio Mac"), sentAt: 0)
         harness.run(for: 50_000)
-        let snapshot = TableSnapshot(step: 7, ball: SIMD2(0.2, 0.5), velocity: SIMD2(0, 1), shotStart: SIMD2(0.2, 0.05), paddleA: 0.2, paddleB: 0.3, phase: .rally, scoreA: 1, scoreB: 2, serving: .playerA, rally: 3, winner: nil)
+        let snapshot = TableSnapshot(step: 7, ball: SIMD3(0.2, 0.5, 0.1), velocity: SIMD3(0, 5, 1), spin: SIMD3(-100, 0, 0), paddleA: 0.2, paddleB: 0.3, phase: .rally, scoreA: 1, scoreB: 2, serving: .playerA, rally: 3, winner: nil)
 
         harness.host.sendToViewer(snapshot)
         try viewer.send(.ping, sentAt: 777)

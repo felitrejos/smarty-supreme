@@ -8,17 +8,17 @@ public struct AIController: Sendable {
 
     private struct Plan: Sendable {
         let paddleX: Double
-        let swingAt: UInt64
+        let swingAt: UInt64?
         let aim: Double
         var hasSwung = false
     }
 
-    private static let steeringContact = 0.6
+    private static let steeringContact = 0.3
 
     private let side: Side
     private let profile: AIProfile
     private var random: SplitMix64
-    private var approachingSince: UInt64?
+    private var comingSince: UInt64?
     private var plan: Plan?
 
     public init(side: Side, profile: AIProfile, seed: UInt64) {
@@ -37,71 +37,56 @@ public struct AIController: Sendable {
         }
         var goal = game.config.tableWidth / 2
         var swing: Swing?
-        if isApproaching(in: game) {
-            let since = approachingSince ?? game.step
-            approachingSince = since
+        if game.isComing(to: side) {
+            let since = comingSince ?? game.step
+            comingSince = since
             if plan == nil, game.step - since >= steps(profile.reactionDelay, in: game.config) {
-                plan = makePlan(for: game)
+                plan = makePlan(for: game, from: current)
             }
             if let plan {
                 goal = plan.paddleX
-                if !plan.hasSwung, game.step >= plan.swingAt {
+                if !plan.hasSwung, let swingAt = plan.swingAt, game.step >= swingAt {
                     swing = makeSwing(in: game, aim: plan.aim)
                     self.plan?.hasSwung = true
                 }
             }
         } else {
-            approachingSince = nil
+            comingSince = nil
             plan = nil
             if case .serving(side, let since) = game.phase, game.step - since >= steps(profile.serveDelay, in: game.config) {
-                swing = makeSwing(in: game, aim: aim(in: game))
+                swing = makeSwing(in: game, aim: steerAway(from: game.paddleX(of: side), in: game).aim)
             }
         }
         let next = moved(current, toward: goal, in: game.config)
         return Move(target: game.config.position(ofPaddleX: next), swing: swing)
     }
 
-    private func isApproaching(in game: GameState) -> Bool {
-        guard case .rally = game.phase else { return false }
-        return game.ball.velocity.y * side.forward < 0
-    }
-
-    private mutating func makePlan(for game: GameState) -> Plan {
+    private mutating func makePlan(for game: GameState, from current: Double) -> Plan {
         let config = game.config
-        let path = BallPath(ball: game.ball, config: config)
-        let zoneMiddle = config.paddleFaceY(of: side) + side.forward * config.zoneDepth(forSpeed: game.ball.speed) / 2
-        let seconds = path.secondsUntil(y: zoneMiddle) ?? 0
-        let swingSeconds = max(seconds + gaussian() * profile.timingError, 0)
-        let contactX = path.position(after: seconds).x
-        let steering = Double.random(in: 0..<1, using: &random) < profile.aimsAwayShare ? steerAway(from: contactX, in: game) : nil
-        let reach = config.paddleWidth / 2 + config.ballRadius
+        guard let contact = game.predictedContact(for: side) else {
+            return Plan(paddleX: current, swingAt: nil, aim: 0)
+        }
+        let contactStep = Double(game.step + contact.stepsAway)
+        let swingAt = UInt64(max(contactStep + gaussian() * profile.timingError * Double(config.stepsPerSecond), Double(game.step)).rounded())
+        let steering = Double.random(in: 0..<1, using: &random) < profile.aimsAwayShare
+            ? steerAway(from: contact.position.x, in: game)
+            : (contact: 0, aim: Double.random(in: -1...1, using: &random))
         return Plan(
-            paddleX: contactX - (steering?.contact ?? 0) * reach + gaussian() * profile.aimError,
-            swingAt: game.step + UInt64((swingSeconds * Double(config.stepsPerSecond)).rounded()),
-            aim: steering?.aim ?? Double.random(in: -1...1, using: &random)
+            paddleX: contact.position.x - steering.contact * config.reach + gaussian() * profile.aimError,
+            swingAt: swingAt,
+            aim: steering.aim
         )
-    }
-
-    private mutating func aim(in game: GameState) -> Double {
-        Double.random(in: 0..<1, using: &random) < profile.aimsAwayShare
-            ? steerAway(from: game.ball.position.x, in: game).aim
-            : Double.random(in: -1...1, using: &random)
     }
 
     private func steerAway(from contactX: Double, in game: GameState) -> (contact: Double, aim: Double) {
         let config = game.config
         let target = (game.paddlePosition(of: side.opponent) < 0.5 ? Lane.right : Lane.left).centre(in: config)
-        let distance = abs(config.paddleFaceY(of: side.opponent) - config.paddleFaceY(of: side))
-        let low = config.ballRadius
-        let high = config.tableWidth - config.ballRadius
-        let maximumAngle = config.maximumReturnAngleDegrees * .pi / 180
-        let angles = [target, 2 * low - target, 2 * high - target].map { atan(($0 - contactX) / distance) }
-        let angle = angles.filter { abs($0) <= maximumAngle }.min { abs($0) < abs($1) } ?? 0
-        let aimRange = (1 - config.contactShare) * maximumAngle
-        let aimAngle = min(max(angle, -aimRange), aimRange)
-        guard config.contactShare > 0 else { return (0, aimAngle / aimRange) }
-        let contact = min(max((angle - aimAngle) / (config.contactShare * maximumAngle), -Self.steeringContact), Self.steeringContact)
-        return (contact, aimAngle / aimRange)
+        let wanted = min(max((target - config.tableWidth / 2) / (config.lateralSpan * config.tableWidth / 2), -1), 1)
+        let aimShare = 1 - config.contactShare
+        let aim = wanted >= 0 ? min(wanted / aimShare, 1) : max(wanted / aimShare, -1)
+        guard config.contactShare > 0 else { return (0, aim) }
+        let contact = min(max((wanted - aimShare * aim) / config.contactShare, -Self.steeringContact), Self.steeringContact)
+        return (contact, aim)
     }
 
     private mutating func makeSwing(in game: GameState, aim: Double) -> Swing {

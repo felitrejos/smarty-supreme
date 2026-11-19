@@ -10,14 +10,13 @@ final class PaddleSensing: Sendable {
     }
 
     struct Outcome {
-        var swing: SwingEvent?
-        var calibratedWith: Sensitivity?
+        var pose: RacketPose?
+        var didCalibrate = false
     }
 
     struct Snapshot {
-        let sensitivity: Sensitivity
         let calibration: CalibrationStatus
-        let reading: PointerReading?
+        let touchPosition: Double?
         let swings: Int
         let lastSwing: SwingEvent?
         let lastDropAt: Microseconds?
@@ -26,12 +25,11 @@ final class PaddleSensing: Sendable {
     }
 
     private struct State {
-        let sensitivity = Sensitivity.low
         var calibration = CalibrationStatus.needed
         var calibrator: Calibrator?
-        var mapper: PointerMapper?
+        var tracker: RacketTracker?
         var detector = SwingDetector()
-        var reading: PointerReading?
+        var touchPosition: Double?
         var swings = 0
         var lastSwing: SwingEvent?
         var lastDropAt: Microseconds?
@@ -44,9 +42,8 @@ final class PaddleSensing: Sendable {
     var snapshot: Snapshot {
         state.withLock { state in
             Snapshot(
-                sensitivity: state.sensitivity,
                 calibration: state.calibration,
-                reading: state.reading,
+                touchPosition: state.touchPosition,
                 swings: state.swings,
                 lastSwing: state.lastSwing,
                 lastDropAt: state.lastDropAt,
@@ -65,8 +62,7 @@ final class PaddleSensing: Sendable {
 
     var position: Double? {
         state.withLock { state in
-            guard case .position(let position) = state.reading else { return nil }
-            return position
+            state.touchPosition
         }
     }
 
@@ -78,7 +74,7 @@ final class PaddleSensing: Sendable {
     }
 
     func setTouchPosition(_ position: Double) {
-        state.withLock { $0.reading = .position(position) }
+        state.withLock { $0.touchPosition = position }
     }
 
     func process(_ sample: MotionSample) -> Outcome {
@@ -89,7 +85,6 @@ final class PaddleSensing: Sendable {
             case .swing(let swing):
                 state.swings += 1
                 state.lastSwing = swing
-                outcome.swing = swing
             case .drop:
                 state.lastDropAt = sample.time
             case nil:
@@ -97,17 +92,17 @@ final class PaddleSensing: Sendable {
             }
             if var calibrator = state.calibrator {
                 if let result = calibrator.add(sample) {
-                    finishCalibration(result, in: &state)
+                    finishCalibration(result, at: sample, in: &state)
                     if case .calibrated = result {
-                        outcome.calibratedWith = state.sensitivity
+                        outcome.didCalibrate = true
                     }
                 } else {
                     state.calibrator = calibrator
                 }
             }
-            if var mapper = state.mapper {
-                state.reading = mapper.update(sample, holding: state.detector.isMidSwing)
-                state.mapper = mapper
+            if var tracker = state.tracker {
+                outcome.pose = tracker.update(sample)
+                state.tracker = tracker
             }
             return outcome
         }
@@ -117,11 +112,11 @@ final class PaddleSensing: Sendable {
         state.withLock { $0.sensorError = error.localizedDescription }
     }
 
-    private func finishCalibration(_ result: CalibrationResult, in state: inout State) {
+    private func finishCalibration(_ result: CalibrationResult, at sample: MotionSample, in state: inout State) {
         state.calibrator = nil
         switch result {
-        case .calibrated(let neutral):
-            state.mapper = PointerMapper(neutralRollDegrees: neutral, sensitivity: state.sensitivity)
+        case .calibrated:
+            state.tracker = RacketTracker(calibratedAt: sample.attitude)
             state.calibration = .calibrated
         case .failed(let failure):
             state.calibration = .failed(failure)

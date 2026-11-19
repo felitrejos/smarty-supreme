@@ -125,21 +125,21 @@ struct LinkTests {
         #expect((59...61).contains(rate))
     }
 
-    @Test func calibratedSensitivityReachesTheHost() {
+    @Test func calibrationReachesTheHost() {
         let harness = LinkHarness()
         let phone = harness.addPhone("Phone A")
         harness.run(for: 100_000)
-        phone.announceCalibration(.low)
+        phone.announceCalibration()
         harness.run(for: 100_000)
-        #expect(harness.host.paddles.first?.sensitivity == .low)
+        #expect(harness.host.paddles.first?.isCalibrated == true)
     }
 
     @Test func calibrationFromBeforePairingReachesTheHostOncePaired() {
         let harness = LinkHarness()
         let phone = harness.addPhone("Phone A")
-        phone.announceCalibration(.high)
+        phone.announceCalibration()
         harness.run(for: 100_000)
-        #expect(harness.host.paddles.first?.sensitivity == .high)
+        #expect(harness.host.paddles.first?.isCalibrated == true)
     }
 
     @Test func phoneSendsNothingButHelloUntilTheHostAccepts() throws {

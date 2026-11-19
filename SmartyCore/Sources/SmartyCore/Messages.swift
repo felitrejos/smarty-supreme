@@ -75,9 +75,9 @@ public struct GameStateUpdate: Equatable, Sendable {
 
 public struct TableSnapshot: Equatable, Sendable {
     public let step: UInt64
-    public let ball: SIMD2<Float>
-    public let velocity: SIMD2<Float>
-    public let shotStart: SIMD2<Float>
+    public let ball: SIMD3<Float>
+    public let velocity: SIMD3<Float>
+    public let spin: SIMD3<Float>
     public let paddleA: Float
     public let paddleB: Float
     public let phase: GamePhase
@@ -89,9 +89,9 @@ public struct TableSnapshot: Equatable, Sendable {
 
     public init(
         step: UInt64,
-        ball: SIMD2<Float>,
-        velocity: SIMD2<Float>,
-        shotStart: SIMD2<Float>,
+        ball: SIMD3<Float>,
+        velocity: SIMD3<Float>,
+        spin: SIMD3<Float>,
         paddleA: Float,
         paddleB: Float,
         phase: GamePhase,
@@ -104,7 +104,7 @@ public struct TableSnapshot: Equatable, Sendable {
         self.step = step
         self.ball = ball
         self.velocity = velocity
-        self.shotStart = shotStart
+        self.spin = spin
         self.paddleA = paddleA
         self.paddleB = paddleB
         self.phase = phase
@@ -116,10 +116,22 @@ public struct TableSnapshot: Equatable, Sendable {
     }
 }
 
+public struct RacketMessage: Equatable, Sendable {
+    public let sampledAt: Microseconds
+    public let orientation: SIMD4<Float>
+    public let velocity: SIMD3<Float>
+
+    public init(sampledAt: Microseconds, orientation: SIMD4<Float>, velocity: SIMD3<Float>) {
+        self.sampledAt = sampledAt
+        self.orientation = orientation
+        self.velocity = velocity
+    }
+}
+
 public enum Message: Equatable, Sendable {
     case hello(name: String)
     case helloAck(name: String)
-    case calibrated(Sensitivity)
+    case calibrated
     case pointer(position: Float)
     case swing(SwingMessage)
     case ready(Bool)
@@ -131,10 +143,11 @@ public enum Message: Equatable, Sendable {
     case viewerHello(name: String)
     case pause(Bool)
     case snapshot(TableSnapshot)
+    case racket(RacketMessage)
 
     public var channel: Channel {
         switch self {
-        case .pointer, .ping, .pong, .snapshot: .unreliable
+        case .pointer, .racket, .ping, .pong, .snapshot: .unreliable
         default: .reliable
         }
     }

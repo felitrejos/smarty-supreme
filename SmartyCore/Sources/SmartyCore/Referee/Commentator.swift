@@ -82,7 +82,7 @@ public struct Commentator: Sendable {
                     callPoint(won: pointWinner, score: score, target: target, at: now)
                 }
                 point = Point()
-            case .wallBounce, .gameOver, .paused, .resumed:
+            case .bounce, .net, .gameOver, .paused, .resumed:
                 break
             }
         }

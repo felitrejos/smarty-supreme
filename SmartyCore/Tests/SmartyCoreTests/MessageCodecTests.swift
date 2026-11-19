@@ -6,8 +6,7 @@ struct MessageCodecTests {
     static let everyMessage: [Message] = [
         .hello(name: "Felipe's iPhone"),
         .helloAck(name: "MacBook Pro"),
-        .calibrated(.high),
-        .calibrated(.low),
+        .calibrated,
         .pointer(position: 0.731),
         .swing(SwingMessage(peakAt: 9_876_543_210, strength: 0.42, direction: SIMD3(0.1, -0.5, 0.86))),
         .ready(true),
@@ -23,9 +22,9 @@ struct MessageCodecTests {
         .pause(false),
         .snapshot(TableSnapshot(
             step: 9_000_000_001,
-            ball: SIMD2(0.31, 0.72),
-            velocity: SIMD2(-0.4, 1.2),
-            shotStart: SIMD2(0.2, 0.05),
+            ball: SIMD3(0.31, 0.72, 0.18),
+            velocity: SIMD3(-0.4, 6.2, 1.1),
+            spin: SIMD3(-210, 12, 3),
             paddleA: 0.18,
             paddleB: 0.44,
             phase: .rally,
@@ -35,6 +34,7 @@ struct MessageCodecTests {
             rally: 70_000,
             winner: .playerA
         )),
+        .racket(RacketMessage(sampledAt: 77_000_123, orientation: SIMD4(0.1, -0.2, 0.3, 0.927), velocity: SIMD3(0.4, 5.5, 1.2))),
     ]
 
     @Test(arguments: everyMessage)
@@ -95,7 +95,6 @@ struct MessageCodecTests {
     static let invalidPayloads: [(UInt8, [UInt8])] = [
         (6, [2]),
         (1, [1, 0x41, 9]),
-        (3, [15]),
         (9, [7]),
         (11, [200]),
         (1, [2, 0xFF, 0xFE, 0]),
@@ -109,10 +108,12 @@ struct MessageCodecTests {
         (10, [4, 0, 0, 0, 0, 0, 2, 0xFF]),
         (10, [4, 0, 0, 0, 0, 0, 0, 2]),
         (13, [2]),
-        (14, zeros8 + notANumber + [UInt8](repeating: 0, count: 28) + [0, 0, 0, 0] + [0, 0, 0, 0, 0xFF]),
-        (14, [UInt8](repeating: 0, count: 36) + infinity + [0, 0, 0, 0] + [0, 0, 0, 0, 0xFF]),
-        (14, [UInt8](repeating: 0, count: 40) + [9, 0, 0, 0] + [0, 0, 0, 0, 0xFF]),
-        (14, [UInt8](repeating: 0, count: 40) + [0, 0, 0, 0] + [0, 0, 0, 0, 3]),
+        (14, zeros8 + notANumber + [UInt8](repeating: 0, count: 40) + [0, 0, 0, 0] + [0, 0, 0, 0, 0xFF]),
+        (14, [UInt8](repeating: 0, count: 48) + infinity + [0, 0, 0, 0] + [0, 0, 0, 0, 0xFF]),
+        (14, [UInt8](repeating: 0, count: 52) + [9, 0, 0, 0] + [0, 0, 0, 0, 0xFF]),
+        (14, [UInt8](repeating: 0, count: 52) + [0, 0, 0, 0] + [0, 0, 0, 0, 3]),
+        (15, zeros8 + notANumber + [UInt8](repeating: 0, count: 24)),
+        (15, zeros8 + [UInt8](repeating: 0, count: 16) + infinity + zeros8),
     ]
 
     @Test(arguments: invalidPayloads)

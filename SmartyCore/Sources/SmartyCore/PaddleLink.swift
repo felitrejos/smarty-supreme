@@ -13,7 +13,7 @@ public final class PaddleLink: Sendable {
         var host: PeerID?
         var status = Status.searching
         var pairedAt: Microseconds?
-        var sensitivity: Sensitivity?
+        var isCalibrated = false
         var gameState: GameStateUpdate?
         var outbox = Outbox()
     }
@@ -74,6 +74,15 @@ public final class PaddleLink: Sendable {
         sendWhilePaired(.pointer(position: Float(position)))
     }
 
+    public func sendRacket(_ pose: RacketPose, at time: Microseconds) {
+        let q = pose.orientation
+        sendWhilePaired(.racket(RacketMessage(
+            sampledAt: time,
+            orientation: SIMD4<Float>(Float(q.imag.x), Float(q.imag.y), Float(q.imag.z), Float(q.real)),
+            velocity: SIMD3<Float>(pose.velocity)
+        )))
+    }
+
     public func sendSwing(_ swing: SwingEvent) {
         sendWhilePaired(.swing(SwingMessage(
             peakAt: swing.peakTime,
@@ -90,11 +99,11 @@ public final class PaddleLink: Sendable {
         sendWhilePaired(.pause(pause))
     }
 
-    public func announceCalibration(_ sensitivity: Sensitivity) {
+    public func announceCalibration() {
         state.withLock { state in
-            state.sensitivity = sensitivity
+            state.isCalibrated = true
             guard case .paired = state.status else { return }
-            send(.calibrated(sensitivity), in: &state)
+            send(.calibrated, in: &state)
         }
     }
 
@@ -119,8 +128,8 @@ public final class PaddleLink: Sendable {
         case .helloAck(let hostName):
             state.status = .paired(hostName: hostName)
             state.pairedAt = state.pairedAt ?? receivedAt
-            if let sensitivity = state.sensitivity {
-                send(.calibrated(sensitivity), in: &state)
+            if state.isCalibrated {
+                send(.calibrated, in: &state)
             }
         case .bye(let reason):
             state.status = .refused(reason)

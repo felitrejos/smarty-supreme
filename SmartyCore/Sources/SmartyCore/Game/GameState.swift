@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 public struct GameState: Equatable, Sendable {
     public enum Phase: Equatable, Sendable {
@@ -9,49 +10,46 @@ public struct GameState: Equatable, Sendable {
         case gameOver(winner: Side)
     }
 
-    public struct Ball: Equatable, Sendable {
-        public var position: SIMD2<Double>
-        public var velocity: SIMD2<Double>
-
-        public var speed: Double {
-            (velocity * velocity).sum().squareRoot()
-        }
+    public struct Contact: Equatable, Sendable {
+        public let stepsAway: UInt64
+        public let position: SIMD3<Double>
     }
 
     private struct Paddle: Equatable, Sendable {
         var x: Double
         var target: Double
         var swingsBlockedUntil: UInt64 = 0
+        var pendingSwing: Swing?
+        var samples: [RacketSample] = []
     }
 
-    private struct Moment: Equatable, Sendable {
+    private struct Chance: Equatable, Sendable {
+        let side: Side
         let step: UInt64
         let ball: Ball
-        let paddleXA: Double
-        let paddleXB: Double
-
-        func paddleX(of side: Side) -> Double {
-            side == .playerA ? paddleXA : paddleXB
-        }
+        let paddleX: Double
     }
 
     private struct PendingPoint: Equatable, Sendable {
         let loser: Side
-        let crossedAt: UInt64
+        let awardAt: UInt64
     }
+
+    private static let sampleMemory = 0.4
+    private static let predictionLimit = 3.0
 
     public let config: GameConfig
     public private(set) var step: UInt64 = 0
     public private(set) var phase: Phase
-    public private(set) var ball: Ball
     public private(set) var score = Score(a: 0, b: 0)
     public private(set) var rally = 0
-    public private(set) var shotStart: SIMD2<Double>
+    public private(set) var flightNumber: UInt64 = 0
+    private var flight: Flight
     private var paddleA: Paddle
     private var paddleB: Paddle
+    private var chance: Chance?
     private var phaseBeforePause: Phase?
     private var pendingPoint: PendingPoint?
-    private var history: [Moment] = []
     private var random: SplitMix64
 
     public init(seed: UInt64, config: GameConfig = GameConfig()) {
@@ -61,9 +59,12 @@ public struct GameState: Equatable, Sendable {
         paddleA = Paddle(x: middle, target: middle)
         paddleB = Paddle(x: middle, target: middle)
         phase = .serving(config.firstServer, since: 0)
-        ball = Ball(position: .zero, velocity: .zero)
-        shotStart = .zero
+        flight = Flight(ball: Ball(position: .zero), hitter: config.firstServer, isServe: true)
         holdBallForServe(by: config.firstServer)
+    }
+
+    public var ball: Ball {
+        flight.ball
     }
 
     public func paddleX(of side: Side) -> Double {
@@ -72,6 +73,30 @@ public struct GameState: Equatable, Sendable {
 
     public func paddlePosition(of side: Side) -> Double {
         config.position(ofPaddleX: paddle(side).x)
+    }
+
+    public func racket(of side: Side) -> RacketSample? {
+        paddle(side).samples.last
+    }
+
+    public func isComing(to side: Side) -> Bool {
+        guard case .rally = phase else { return false }
+        return flight.receiver == side && !flight.isDecided
+    }
+
+    public func predictedContact(for side: Side) -> Contact? {
+        guard isComing(to: side) else { return nil }
+        var future = flight
+        for stepsAway in 1...max(config.steps(Self.predictionLimit), 1) {
+            for event in future.advance(config: config) {
+                switch event {
+                case .chance(side): return Contact(stepsAway: stepsAway, position: future.ball.position)
+                case .fault: return nil
+                default: break
+                }
+            }
+        }
+        return nil
     }
 
     public mutating func step(_ input: StepInput) -> [GameEvent] {
@@ -85,18 +110,22 @@ public struct GameState: Equatable, Sendable {
         }
         step += 1
         movePaddles(input)
+        remember(input.rackets)
         for swing in input.swings {
             handle(swing, events: &events)
         }
         switch phase {
         case .serving(let server, let since):
             holdBallForServe(by: server)
-            if step - since >= config.steps(config.autoServeAfter) {
+            if let sample = paddle(server).samples.last, sample.step + config.steps(config.lagCompensation) >= step, sample.speed >= config.serveThreshold, step >= paddle(server).swingsBlockedUntil {
+                serve(by: server, strength: min(sample.speed / config.fullSwingSpeed, 1), aim: 0, events: &events)
+            } else if step - since >= config.steps(config.autoServeAfter) {
                 serve(by: server, strength: config.autoServeStrength, aim: 0, events: &events)
             }
         case .rally:
-            ball = advance(ball, events: &events)
-            detectGoalLine()
+            fly(events: &events)
+            resolveChance(events: &events)
+            expireSwings(events: &events)
             awardPendingPoint(events: &events)
         case .pointScored(let until):
             if step >= until {
@@ -105,7 +134,6 @@ public struct GameState: Equatable, Sendable {
         case .paused, .gameOver:
             break
         }
-        record()
         return events
     }
 
@@ -145,104 +173,140 @@ public struct GameState: Equatable, Sendable {
         }
     }
 
+    private mutating func remember(_ samples: [RacketSample]) {
+        let memory = UInt64(config.steps(Self.sampleMemory))
+        for sample in samples {
+            var paddle = paddle(sample.side)
+            paddle.samples.append(sample)
+            paddle.samples.removeAll { $0.step + memory < step }
+            setPaddle(sample.side, paddle)
+        }
+    }
+
     private mutating func handle(_ swing: Swing, events: inout [GameEvent]) {
-        guard step >= paddle(swing.side).swingsBlockedUntil else { return }
+        let side = swing.side
+        guard step >= paddle(side).swingsBlockedUntil else { return }
         switch phase {
         case .serving(let server, _):
-            guard swing.side == server else { return }
+            guard side == server else { return }
             serve(by: server, strength: swing.strength, aim: swing.aim, events: &events)
         case .rally:
-            guard let moment = moment(forSwingAt: swing.step) else { return }
-            if isReturnable(moment, by: swing.side) {
-                hit(moment, swing: swing, events: &events)
+            if let chance, chance.side == side, isInWindow(swing.step, of: chance) {
+                hit(chance, with: swing, events: &events)
             } else {
-                block(swing.side)
-                events.append(.whiff(swing.side))
+                var paddle = paddle(side)
+                paddle.pendingSwing = swing
+                setPaddle(side, paddle)
             }
         case .pointScored, .paused, .gameOver:
             return
         }
     }
 
-    private func moment(forSwingAt swingStep: UInt64) -> Moment? {
-        history.last { $0.step <= swingStep } ?? history.first
-    }
-
-    private func isReturnable(_ moment: Moment, by side: Side) -> Bool {
-        let approaching = moment.ball.velocity.y * side.forward < 0
-        let face = config.paddleFaceY(of: side)
-        let depth = config.zoneDepth(forSpeed: moment.ball.speed)
-        let distanceInFront = (moment.ball.position.y - face) * side.forward
-        let inZone = distanceInFront >= 0 && distanceInFront <= depth
-        return approaching && inZone && config.canReach(ballX: moment.ball.position.x, paddleX: moment.paddleX(of: side))
-    }
-
-    private mutating func hit(_ moment: Moment, swing: Swing, events: inout [GameEvent]) {
-        let side = swing.side
-        let reach = config.paddleWidth / 2 + config.ballRadius
-        let contact = min(max((moment.ball.position.x - moment.paddleX(of: side)) / reach, -1), 1)
-        let maximumAngle = config.maximumReturnAngleDegrees * .pi / 180
-        let angle = config.contactShare * contact * maximumAngle + (1 - config.contactShare) * swing.aim * maximumAngle
-        let speed = min(moment.ball.speed * config.speedGain + swing.strength * config.strengthBoost, config.maximumSpeed)
-
-        var returned = Ball(position: moment.ball.position, velocity: SIMD2(sin(angle), cos(angle) * side.forward) * speed)
-        var ignored: [GameEvent] = []
-        for _ in moment.step..<(step - 1) {
-            returned = advance(returned, events: &ignored)
+    private mutating func fly(events: inout [GameEvent]) {
+        for event in flight.advance(config: config) {
+            switch event {
+            case .bounce(let half): events.append(.bounce(half))
+            case .net: events.append(.net)
+            case .fault(let loser): pendingPoint = PendingPoint(loser: loser, awardAt: step + config.steps(config.lagCompensation))
+            case .chance(let side): chance = Chance(side: side, step: step, ball: flight.ball, paddleX: paddle(side).x)
+            }
         }
-        ball = returned
-        shotStart = moment.ball.position
+    }
+
+    private mutating func resolveChance(events: inout [GameEvent]) {
+        guard let chance else { return }
+        let side = chance.side
+        if let swing = paddle(side).pendingSwing, isInWindow(swing.step, of: chance) {
+            hit(chance, with: swing, events: &events)
+            return
+        }
+        let waited = step - chance.step
+        let samples = paddle(side).samples
+        let hasSamplesPastContact = samples.contains { $0.step >= chance.step }
+        if hasSamplesPastContact || waited >= config.steps(config.lagCompensation) {
+            let window = config.steps(config.swingWindow)
+            let swinging = samples.filter { $0.speed >= config.swingThreshold && $0.step + window >= chance.step && $0.step <= chance.step + window }
+            if let sample = swinging.min(by: { distance($0.step, chance.step) < distance($1.step, chance.step) }),
+               isReachable(chance),
+               let returned = Shot.racket(chance.ball, by: side, sample: sample, config: config) {
+                land(returned, from: chance, strength: min(sample.speed / config.fullSwingSpeed, 1), contact: contactPoint(of: chance), events: &events)
+                return
+            }
+        }
+        if waited > max(config.steps(config.swingWindow), config.steps(config.lagCompensation)) {
+            self.chance = nil
+        }
+    }
+
+    private mutating func hit(_ chance: Chance, with swing: Swing, events: inout [GameEvent]) {
+        var paddle = paddle(swing.side)
+        paddle.pendingSwing = nil
+        setPaddle(swing.side, paddle)
+        guard isReachable(chance) else {
+            whiff(swing.side, events: &events)
+            return
+        }
+        let timing = (Double(swing.step) - Double(chance.step)) / Double(max(config.steps(config.swingWindow), 1))
+        let plan = Shot.Plan(strength: swing.strength, aim: swing.aim, contact: contactPoint(of: chance), timing: min(max(timing, -1), 1))
+        let returned = Shot.planned(chance.ball, by: swing.side, plan: plan, wander: Double.random(in: -1...1, using: &random), config: config)
+        land(returned, from: chance, strength: swing.strength, contact: plan.contact, events: &events)
+    }
+
+    private mutating func land(_ returned: Ball, from chance: Chance, strength: Double, contact: Double, events: inout [GameEvent]) {
+        let side = chance.side
+        flight = Flight(ball: returned, hitter: side, isServe: false)
+        flightNumber += 1
+        self.chance = nil
         if pendingPoint?.loser == side {
             pendingPoint = nil
         }
-        history.removeAll(keepingCapacity: true)
         rally += 1
         block(side)
-        events.append(.hit(side, strength: swing.strength, rally: rally))
+        events.append(.hit(side, strength: strength, rally: rally))
         if abs(contact) >= config.edgeContact {
             events.append(.edgeHit(side))
         }
+        for _ in chance.step..<step {
+            for event in flight.advance(config: config) {
+                if case .fault(let loser) = event {
+                    pendingPoint = PendingPoint(loser: loser, awardAt: step + config.steps(config.lagCompensation))
+                }
+            }
+        }
+    }
+
+    private mutating func expireSwings(events: inout [GameEvent]) {
+        let window = config.steps(config.swingWindow)
+        for side in Side.allCases {
+            guard let swing = paddle(side).pendingSwing, swing.step + window < step, chance?.side != side else { continue }
+            var paddle = paddle(side)
+            paddle.pendingSwing = nil
+            setPaddle(side, paddle)
+            whiff(side, events: &events)
+        }
+    }
+
+    private mutating func whiff(_ side: Side, events: inout [GameEvent]) {
+        block(side)
+        events.append(.whiff(side))
     }
 
     private mutating func serve(by server: Side, strength: Double, aim: Double, events: inout [GameEvent]) {
-        let spread = config.serveSpreadDegrees * .pi / 180
-        let aimRange = (1 - config.contactShare) * config.maximumReturnAngleDegrees * .pi / 180
-        let angle = Double.random(in: -spread...spread, using: &random) + aim * aimRange
-        let speed = min(config.startSpeed + strength * config.strengthBoost, config.maximumSpeed)
-        ball.velocity = SIMD2(sin(angle), cos(angle) * server.forward) * speed
-        shotStart = ball.position
+        let plan = Shot.Plan(strength: strength, aim: aim, contact: 0, timing: 0)
+        flightNumber += 1
+        flight = Flight(ball: Shot.serve(from: flight.ball.position, by: server, plan: plan, config: config), hitter: server, isServe: true)
         rally = 0
+        chance = nil
         phase = .rally
         block(server)
         events.append(.served(server))
     }
 
-    private func advance(_ ball: Ball, events: inout [GameEvent]) -> Ball {
-        var position = ball.position + ball.velocity * config.stepDuration
-        var velocity = ball.velocity
-        let low = config.ballRadius
-        let high = config.tableWidth - config.ballRadius
-        while position.x < low || position.x > high {
-            position.x = position.x < low ? 2 * low - position.x : 2 * high - position.x
-            velocity.x = -velocity.x
-            events.append(.wallBounce)
-        }
-        return Ball(position: position, velocity: velocity)
-    }
-
-    private mutating func detectGoalLine() {
-        guard pendingPoint == nil else { return }
-        if ball.position.y < 0 {
-            pendingPoint = PendingPoint(loser: .playerA, crossedAt: step)
-        } else if ball.position.y > config.tableLength {
-            pendingPoint = PendingPoint(loser: .playerB, crossedAt: step)
-        }
-    }
-
     private mutating func awardPendingPoint(events: inout [GameEvent]) {
-        guard let pending = pendingPoint, step - pending.crossedAt >= config.steps(config.lagCompensation) else { return }
+        guard let pending = pendingPoint, step >= pending.awardAt, chance?.side != pending.loser else { return }
         pendingPoint = nil
-        history.removeAll(keepingCapacity: true)
+        chance = nil
         rally = 0
         let winner = pending.loser.opponent
         score.award(winner)
@@ -262,22 +326,33 @@ public struct GameState: Equatable, Sendable {
     }
 
     private mutating func holdBallForServe(by server: Side) {
-        let y = config.paddleFaceY(of: server) + server.forward * (config.ballRadius + 0.01)
-        ball = Ball(position: SIMD2(paddle(server).x, y), velocity: .zero)
-        shotStart = ball.position
+        let edge = config.ballRadius * 4
+        let x = min(max(paddle(server).x, edge), config.tableWidth - edge)
+        let y = server == .playerA ? -config.ballRadius * 3 : config.tableLength + config.ballRadius * 3
+        flight = Flight(ball: Ball(position: SIMD3(x, y, config.serveHeight)), hitter: server, isServe: true)
+    }
+
+    private func isInWindow(_ swingStep: UInt64, of chance: Chance) -> Bool {
+        distance(swingStep, chance.step) <= config.steps(config.swingWindow)
+    }
+
+    private func isReachable(_ chance: Chance) -> Bool {
+        config.canReach(ballX: chance.ball.position.x, paddleX: chance.paddleX)
+            && (config.lowestContact...config.highestContact).contains(chance.ball.position.z)
+    }
+
+    private func contactPoint(of chance: Chance) -> Double {
+        min(max((chance.ball.position.x - chance.paddleX) / config.reach, -1), 1)
+    }
+
+    private func distance(_ a: UInt64, _ b: UInt64) -> UInt64 {
+        a > b ? a - b : b - a
     }
 
     private mutating func block(_ side: Side) {
         var paddle = paddle(side)
         paddle.swingsBlockedUntil = step + config.steps(config.swingCooldown)
         setPaddle(side, paddle)
-    }
-
-    private mutating func record() {
-        history.append(Moment(step: step, ball: ball, paddleXA: paddleA.x, paddleXB: paddleB.x))
-        if history.count > Int(config.steps(config.lagCompensation)) + 1 {
-            history.removeFirst()
-        }
     }
 
     private func paddle(_ side: Side) -> Paddle {

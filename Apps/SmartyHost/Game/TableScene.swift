@@ -10,6 +10,11 @@ struct TablePose {
         let isWhiff: Bool
     }
 
+    struct Forecast {
+        let secondsAway: Double
+        let position: SIMD3<Double>
+    }
+
     enum Outcome {
         case point
         case win
@@ -18,21 +23,24 @@ struct TablePose {
     private static let serveStrength = 0.4
     private static let viewerHitStrength = 0.6
 
-    let ball: SIMD2<Double>
-    let velocity: SIMD2<Double>
-    let shotStartY: Double
+    let ball: SIMD3<Double>
+    let velocity: SIMD3<Double>
+    let spin: SIMD3<Double>
     let paddleA: Double
     let paddleB: Double
     let isRally: Bool
     let contacts: [Contact]
+    let bounced: Bool
     let outcome: Outcome?
     let dimmed: Set<Side>
     let score: Score
+    let rackets: [Side: RacketSample]
+    let forecasts: [Side: Forecast]
 
-    init(game: GameState, events: [GameEvent], dimmed: Set<Side>) {
+    init(game: GameState, events: [GameEvent], dimmed: Set<Side>, forecasts: [Side: Forecast]) {
         ball = game.ball.position
         velocity = game.ball.velocity
-        shotStartY = game.shotStart.y
+        spin = game.ball.spin
         paddleA = game.paddleX(of: .playerA)
         paddleB = game.paddleX(of: .playerB)
         if case .rally = game.phase {
@@ -48,21 +56,18 @@ struct TablePose {
             default: nil
             }
         }
-        if events.contains(where: { if case .gameOver = $0 { true } else { false } }) {
-            outcome = .win
-        } else if events.contains(where: { if case .pointScored = $0 { true } else { false } }) {
-            outcome = .point
-        } else {
-            outcome = nil
-        }
+        bounced = events.contains { if case .bounce = $0 { true } else { false } }
+        outcome = Self.outcome(of: events)
         self.dimmed = dimmed
         score = game.score
+        rackets = Dictionary(uniqueKeysWithValues: Side.allCases.compactMap { side in game.racket(of: side).map { (side, $0) } })
+        self.forecasts = forecasts
     }
 
     init(frame: ViewerDisplay.Frame, previous: ViewerDisplay.Frame?) {
         ball = frame.ball
         velocity = frame.velocity
-        shotStartY = frame.shotStart.y
+        spin = .zero
         paddleA = frame.paddleA
         paddleB = frame.paddleB
         isRally = frame.phase == .rally
@@ -72,6 +77,7 @@ struct TablePose {
         } else {
             contacts = []
         }
+        bounced = previous.map { $0.velocity.z < 0 && frame.velocity.z > 0 && frame.ball.z < 0.1 } ?? false
         if let previous, previous.phase != .gameOver, frame.phase == .gameOver {
             outcome = .win
         } else if let previous, frame.scoreA + frame.scoreB > previous.scoreA + previous.scoreB {
@@ -81,6 +87,8 @@ struct TablePose {
         }
         dimmed = []
         score = Score(a: frame.scoreA, b: frame.scoreB)
+        rackets = [:]
+        forecasts = [:]
     }
 
     var speed: Double {
@@ -90,17 +98,27 @@ struct TablePose {
     func paddleX(of side: Side) -> Double {
         side == .playerA ? paddleA : paddleB
     }
+
+    private static func outcome(of events: [GameEvent]) -> Outcome? {
+        if events.contains(where: { if case .gameOver = $0 { true } else { false } }) {
+            return .win
+        }
+        if events.contains(where: { if case .pointScored = $0 { true } else { false } }) {
+            return .point
+        }
+        return nil
+    }
 }
 
 @MainActor
 final class TableScene {
     private typealias Size = Equipment.Size
 
-    private enum Arc {
-        static let paddleHeight: Float = 0.17
-        static let firstApex: Float = 0.24
-        static let secondApex: Float = 0.12
-        static let bounceAt: Float = 0.7
+    private enum Reach {
+        static let restingHeight: Float = 0.17
+        static let lowest: Float = -0.1
+        static let highest: Float = 0.6
+        static let rate: Float = 8
     }
 
     private enum Impact {
@@ -109,8 +127,8 @@ final class TableScene {
         static let glowOpacity: Float = 0.6
         static let trailLength = 6
         static let trailOpacity: Float = 0.3
-        static let trailFromSpeed = 0.7
-        static let trailFullSpeed = 1.5
+        static let trailFromSpeed = 6.0
+        static let trailFullSpeed = 12.0
     }
 
     private static let dimmedOpacity: Float = 0.35
@@ -126,12 +144,14 @@ final class TableScene {
     private static let whiffStrength = 0.3
     private static let paddleRollPerSpeed: Float = 0.08
     private static let maximumRoll: Float = 0.3
-    private static let paddleLiftPerSpeed: Float = 0.02
-    private static let spinShare: Float = 0.1
     private static let fieldOfView: Float = 34
     private static let halfScreenWidthFieldOfView: Float = 42
     private static let halfScreenTargetHeight: Float = 0.4
-    private static let maximumSpin: Float = 28
+    private static let maximumSpin: Float = 30
+    private static let crowdViewHalfAngle: Float = 55 * .pi / 180
+    private static let cameraMove: TimeInterval = 1.1
+    private static let tableToScene = simd_quatf(angle: -.pi / 2, axis: [1, 0, 0])
+    private static let phoneToBat = simd_quatf(angle: .pi, axis: [0, 1, 0])
 
     let root = Entity()
     private let camera = PerspectiveCamera()
@@ -147,15 +167,15 @@ final class TableScene {
     private var cardMaterials: [Int: PhysicallyBasedMaterial] = [:]
     private var glowElapsed: TimeInterval?
     private var ballTrail: [SIMD3<Float>] = []
-    private var lastBallPosition: SIMD3<Float>?
-    private var lastProgress: Float?
+    private var heights: [Side: Float] = [:]
+    private var cameraMoves = 0
     private var view = CameraView.playerAEnd
     private let config: GameConfig
 
     init(config: GameConfig, playsSounds: Bool = true) async throws {
         self.config = config
         sounds = playsSounds ? try SoundBoard() : nil
-        let width = Float(config.tableWidth) * Size.metresPerTableLength
+        let width = Float(config.tableWidth)
         let materials = try await Equipment.Materials.make(tableWidth: width)
         ball = Equipment.ball(materials)
         let hall = try await Hall.load()
@@ -233,16 +253,25 @@ final class TableScene {
             target.y = Self.halfScreenTargetHeight
         }
         placement.look(at: target, from: position, relativeTo: nil)
+        cameraMoves += 1
+        let forward = simd_normalize(target - position)
         if animated {
-            camera.move(to: placement.transform, relativeTo: nil, duration: 1.1, timingFunction: .easeInOut)
+            crowd.showAll()
+            camera.move(to: placement.transform, relativeTo: nil, duration: Self.cameraMove, timingFunction: .easeInOut)
+            let move = cameraMoves
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.cameraMove))
+                guard let self, cameraMoves == move else { return }
+                crowd.show(onlyWhatIsSeenFrom: position, looking: forward, within: Self.crowdViewHalfAngle)
+            }
         } else {
             camera.transform = placement.transform
+            crowd.show(onlyWhatIsSeenFrom: position, looking: forward, within: Self.crowdViewHalfAngle)
         }
     }
 
     func update(to pose: TablePose, elapsed: TimeInterval) {
-        let arc = arc(for: pose)
-        let ballPosition: SIMD3<Float> = [sceneX(pose.ball.x), Size.tableHeight + arc.height, sceneZ(pose.ball.y)]
+        let ballPosition = scenePoint(pose.ball)
         for contact in pose.contacts {
             motions[contact.side]?.hit(strength: Float(contact.isWhiff ? Self.whiffStrength : contact.strength))
             if !contact.isWhiff {
@@ -250,47 +279,52 @@ final class TableScene {
                 glowElapsed = 0
             }
         }
+        if pose.bounced {
+            sounds?.play(.table, pan: pan(at: pose.ball))
+        }
         switch pose.outcome {
         case .point: sounds?.play(.point, pan: 0)
         case .win: sounds?.play(.win, pan: 0)
         case nil: break
         }
         crowd.update(elapsed: elapsed, cheer: pose.outcome != nil)
-        if let progress = arc.progress, let lastProgress, lastProgress < Arc.bounceAt, progress >= Arc.bounceAt {
-            sounds?.play(.table, pan: pan(at: pose.ball))
-        }
-        lastProgress = arc.progress
         showScore(pose.score)
         let seconds = Float(max(elapsed, 1e-4))
         for paddle in paddles {
-            let side = paddle.side
-            let behind = side == .playerA ? Self.paddleBehindFace : -Self.paddleBehindFace
-            let target = sceneX(pose.paddleX(of: side))
-            var motion = motions[side] ?? PaddleMotion(x: target)
-            let toward: Double = side == .playerA ? -1 : 1
-            let approaching = pose.isRally && pose.velocity.y * toward > 0
-            let secondsToContact = approaching ? Float((config.paddleFaceY(of: side) - pose.ball.y) / pose.velocity.y) : nil
-            let mirror: Float = side == .playerA ? 1 : -1
-            let across = (sceneX(pose.ball.x) - motion.x) * mirror
-            let contactAcross = secondsToContact.map { seconds in
-                let path = BallPath(position: pose.ball, velocity: pose.velocity, config: config)
-                return (sceneX(path.position(after: Double(seconds)).x) - motion.x) * mirror
-            }
-            motion.update(target: target, ballAcross: across, contactAcross: contactAcross, secondsToContact: secondsToContact, elapsed: seconds)
-            motions[side] = motion
-            let speed = motion.lateralSpeed * (side == .playerA ? 1 : -1)
-            let roll = min(max(speed * Self.paddleRollPerSpeed, -Self.maximumRoll), Self.maximumRoll)
-            let pose3 = motion.pose()
-            paddle.root.position = [motion.x, Size.tableHeight + Arc.paddleHeight + abs(speed) * Self.paddleLiftPerSpeed, sceneZ(config.paddleFaceY(of: side)) + behind]
-            let tilt = -lean(of: side, in: pose) - roll
-            let bladeShift = Size.grip * sin(tilt) * motion.reachWeight
-            paddle.pivot.position = SIMD3(bladeShift, -Size.grip, 0) + pose3.offset
-            paddle.pivot.orientation = simd_quatf(angle: tilt, axis: [0, 0, 1]) * pose3.orientation
-            paddle.root.components.set(OpacityComponent(opacity: pose.dimmed.contains(side) ? Self.dimmedOpacity : 1))
+            place(paddle, in: pose, elapsed: seconds)
         }
-        spinBall(to: ballPosition, elapsed: Float(elapsed))
+        spinBall(to: ballPosition, spin: pose.spin, elapsed: Float(elapsed))
         updateGlow(at: ballPosition, elapsed: elapsed)
         updateTrail(behind: ballPosition, speed: pose.isRally ? pose.speed : 0)
+    }
+
+    private func place(_ paddle: (side: Side, root: Entity, pivot: Entity), in pose: TablePose, elapsed: Float) {
+        let side = paddle.side
+        let mirror: Float = side == .playerA ? 1 : -1
+        let target = sceneX(pose.paddleX(of: side))
+        var motion = motions[side] ?? PaddleMotion(x: target)
+        let forecast = pose.isRally ? pose.forecasts[side] : nil
+        let across = (sceneX(pose.ball.x) - motion.x) * mirror
+        let contactAcross = forecast.map { (sceneX($0.position.x) - motion.x) * mirror }
+        motion.update(target: target, ballAcross: across, contactAcross: contactAcross, secondsToContact: forecast.map { Float($0.secondsAway) }, elapsed: elapsed)
+        motions[side] = motion
+        let wanted = forecast.map { min(max(Float($0.position.z), Reach.lowest), Reach.highest) } ?? Reach.restingHeight
+        let height = (heights[side] ?? Reach.restingHeight) + (wanted - (heights[side] ?? Reach.restingHeight)) * min(Reach.rate * elapsed, 1)
+        heights[side] = height
+        paddle.root.position = [motion.x, Size.tableHeight + height, sceneZ(config.contactY(of: side)) + Self.paddleBehindFace * mirror]
+        if let racket = pose.rackets[side] {
+            let orientation = simd_quatf(ix: Float(racket.orientation.imag.x), iy: Float(racket.orientation.imag.y), iz: Float(racket.orientation.imag.z), r: Float(racket.orientation.real))
+            paddle.pivot.position = [0, -Size.grip, 0]
+            paddle.pivot.orientation = Self.tableToScene * orientation * Self.phoneToBat
+        } else {
+            let speed = motion.lateralSpeed * mirror
+            let roll = min(max(speed * Self.paddleRollPerSpeed, -Self.maximumRoll), Self.maximumRoll)
+            let stroke = motion.pose()
+            let tilt = -lean(of: side, in: pose) - roll
+            paddle.pivot.position = SIMD3(Size.grip * sin(tilt) * motion.reachWeight, -Size.grip, 0) + stroke.offset
+            paddle.pivot.orientation = simd_quatf(angle: tilt, axis: [0, 0, 1]) * stroke.orientation
+        }
+        paddle.root.components.set(OpacityComponent(opacity: pose.dimmed.contains(side) ? Self.dimmedOpacity : 1))
     }
 
     private func showScore(_ score: Score) {
@@ -355,19 +389,16 @@ final class TableScene {
         }
     }
 
-    private func spinBall(to position: SIMD3<Float>, elapsed: Float) {
-        defer { lastBallPosition = position }
+    private func spinBall(to position: SIMD3<Float>, spin: SIMD3<Double>, elapsed: Float) {
         ball.position = position
-        guard let last = lastBallPosition, elapsed > 0 else { return }
-        var travel = (position - last) / elapsed
-        travel.y = 0
-        let axis = simd_cross([0, 1, 0], travel)
-        guard simd_length(axis) > 0.01 else { return }
-        let rate = min(simd_length(travel) / Size.ballRadius * Self.spinShare, Self.maximumSpin)
-        ball.orientation = simd_quatf(angle: rate * elapsed, axis: simd_normalize(axis)) * ball.orientation
+        let axis = sceneVector(spin)
+        let rate = simd_length(axis)
+        guard rate > 0.01, elapsed > 0 else { return }
+        let shown = min(rate * Float(config.timeScale), Self.maximumSpin)
+        ball.orientation = simd_quatf(angle: shown * elapsed, axis: axis / rate) * ball.orientation
     }
 
-    private func pan(at ball: SIMD2<Double>) -> Float {
+    private func pan(at ball: SIMD3<Double>) -> Float {
         let across = Float(ball.x / config.tableWidth * 2 - 1)
         let along = Float(ball.y / config.tableLength * 2 - 1)
         switch view {
@@ -377,32 +408,26 @@ final class TableScene {
         }
     }
 
-    private func arc(for pose: TablePose) -> (height: Float, progress: Float?) {
-        guard pose.isRally else { return (Arc.paddleHeight, nil) }
-        let receiver = pose.velocity.y > 0 ? Side.playerB : Side.playerA
-        let start = pose.shotStartY
-        let end = config.paddleFaceY(of: receiver)
-        let progress = Float(min(max((pose.ball.y - start) / (end - start), 0), 1.3))
-        if progress < Arc.bounceAt {
-            let u = progress / Arc.bounceAt
-            return (Arc.paddleHeight * (1 - u) + Size.ballRadius * u + Arc.firstApex * 4 * u * (1 - u), progress)
-        }
-        let v = (progress - Arc.bounceAt) / (1 - Arc.bounceAt)
-        return (Size.ballRadius * (1 - v) + Arc.paddleHeight * v + Arc.secondApex * 4 * v * (1 - v), progress)
-    }
-
     private func sceneX(_ x: Double) -> Float {
-        Float(x - config.tableWidth / 2) * Size.metresPerTableLength
+        Float(x - config.tableWidth / 2)
     }
 
     private func sceneZ(_ y: Double) -> Float {
-        Float(config.tableLength / 2 - y) * Size.metresPerTableLength
+        Float(config.tableLength / 2 - y)
+    }
+
+    private func scenePoint(_ point: SIMD3<Double>) -> SIMD3<Float> {
+        [sceneX(point.x), Size.tableHeight + Float(point.z), sceneZ(point.y)]
+    }
+
+    private func sceneVector(_ vector: SIMD3<Double>) -> SIMD3<Float> {
+        [Float(vector.x), Float(vector.z), -Float(vector.y)]
     }
 
     private static func placement(for view: CameraView) -> (SIMD3<Float>, SIMD3<Float>) {
         switch view {
-        case .playerAEnd, .split: ([0, 1.65, 3.4], [0, 0.68, -0.5])
-        case .playerBEnd: ([0, 1.65, -3.4], [0, 0.68, 0.5])
+        case .playerAEnd, .split: ([0, 1.7, 3.8], [0, 0.68, -0.5])
+        case .playerBEnd: ([0, 1.7, -3.8], [0, 0.68, 0.5])
         }
     }
 

@@ -1,6 +1,6 @@
 # Development
 
-How Smarty Supreme is put together, built and tested. Design decisions and their references are in [DESIGN.md](../DESIGN.md). The spec lives in Claude Docs.
+How Smarty Supreme is put together, built and tested. Design decisions and their references are in [DESIGN.md](../DESIGN.md); ball physics, rules and the phone-as-bat model are in [PHYSICS.md](PHYSICS.md). The spec lives in Claude Docs.
 
 ## Layout
 
@@ -8,7 +8,7 @@ How Smarty Supreme is put together, built and tested. Design decisions and their
 | --- | --- |
 | `SmartyCore/` | Swift package with all hardware-free logic: swing detection and paddle mapping, the binary protocol and links, the 240 Hz game engine, the computer opponent, the match session (lobby, pauses, reconnects), the second-Mac viewer, and the referee's commentary. `SmartyTestSupport` holds the fakes (`ManualClock`, `LoopbackNetwork`). `FixtureTools` and the `smarty-fixtures` command check and split the motion dataset. |
 | `Apps/SmartyHost/` | Mac app (macOS 26+), shipped as Smarty Supreme: the 3D arena, keyboard input, sound, the voices, and the iPhone Paddles window. It can also act as Player B's screen for another Mac. |
-| `Apps/SmartyPaddle/` | iPhone paddle (iOS 18+), shipped as Smarty Paddle: pairs with the Mac, calibrates, sends tilt at 60 Hz and swings as they happen, and plays haptics |
+| `Apps/SmartyPaddle/` | iPhone paddle (iOS 18+), shipped as Smarty Paddle: pairs with the Mac, calibrates, streams the bat's orientation and blade speed at 100 Hz, and plays haptics |
 | `Apps/SmartyRecorder/` | iPhone app that records labelled motion data for the swing detector |
 | `Apps/Shared/` | Core Motion wrapper shared by the iPhone apps |
 | `Apps/Link/` | MultipeerConnectivity transport shared by the paddle and the Mac |

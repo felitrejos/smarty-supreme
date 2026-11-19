@@ -19,7 +19,7 @@ targets:
   SmartyPaddle:
     type: application
     platform: iOS
-    sources: [Apps/SmartyPaddle, Apps/Shared, Apps/Link, Apps/Style]
+    sources: [Apps/SmartyPaddle, Apps/Shared, Apps/Link, Apps/Style, Apps/Icon]
     dependencies:
       - package: SmartyCore
     settings:
@@ -55,6 +55,7 @@ targets:
       - Apps/SmartyHost
       - Apps/Link
       - Apps/Style
+      - Apps/Icon
       - path: Assets/Lighting
         buildPhase: resources
         excludes: ["*.md"]

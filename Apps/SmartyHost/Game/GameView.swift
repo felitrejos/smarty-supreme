@@ -11,6 +11,25 @@ final class Stage {
     var failure: String?
     @ObservationIgnored var updates: EventSubscription?
     @ObservationIgnored let feed = PoseFeed()
+    @ObservationIgnored private var forecastFlight: UInt64?
+    @ObservationIgnored private var forecastSteps: [Side: (step: UInt64, position: SIMD3<Double>)] = [:]
+
+    func forecasts(for game: GameState) -> [Side: TablePose.Forecast] {
+        if forecastFlight != game.flightNumber {
+            forecastFlight = game.flightNumber
+            forecastSteps = [:]
+            for side in Side.allCases {
+                if let contact = game.predictedContact(for: side) {
+                    forecastSteps[side] = (game.step + contact.stepsAway, contact.position)
+                }
+            }
+        }
+        var forecasts: [Side: TablePose.Forecast] = [:]
+        for (side, contact) in forecastSteps where contact.step >= game.step {
+            forecasts[side] = TablePose.Forecast(secondsAway: Double(contact.step - game.step) / Double(game.config.stepsPerSecond), position: contact.position)
+        }
+        return forecasts
+    }
 }
 
 @MainActor
@@ -159,7 +178,7 @@ struct GameView: View {
                 stage.scene = scene
                 stage.updates = content.subscribe(to: SceneEvents.Update.self) { event in
                     let events = match.advance()
-                    let pose = TablePose(game: match.game, events: events, dimmed: match.dimmed)
+                    let pose = TablePose(game: match.game, events: events, dimmed: match.dimmed, forecasts: stage.forecasts(for: match.game))
                     scene.update(to: pose, elapsed: event.deltaTime)
                     stage.feed.push(pose, elapsed: event.deltaTime)
                     stats.record(event.deltaTime)
@@ -186,7 +205,7 @@ struct GameView: View {
         switch match.controller(of: side) {
         case .phone: .phone
         case .computer: .computer(match.setup.difficulty)
-        case .local: side == .playerA ? .keyboard(move: ["A", "D"], swing: "W") : .keyboard(move: ["←", "→"], swing: "↑")
+        case .local: side == .playerA ? .keyboard(aim: ["A", "D"], swing: "W") : .keyboard(aim: ["←", "→"], swing: "↑")
         }
     }
 
@@ -316,7 +335,7 @@ private struct WinnerCard: View {
 }
 
 private enum PlayerControls {
-    case keyboard(move: [String], swing: String)
+    case keyboard(aim: [String], swing: String)
     case phone
     case computer(Difficulty)
 }
@@ -346,11 +365,11 @@ private struct ControlsHint: View {
                 .font(Programme.title(12))
                 .tracking(1)
             switch controls(side) {
-            case .keyboard(let move, let swing):
+            case .keyboard(let aim, let swing):
                 HStack(spacing: 3) {
-                    ForEach(move, id: \.self) { Keycap(label: $0) }
+                    ForEach(aim, id: \.self) { Keycap(label: $0) }
                 }
-                Text("move")
+                Text("aim")
                     .foregroundStyle(.secondary)
                 Keycap(label: swing)
                 Text("swing")
@@ -358,7 +377,7 @@ private struct ControlsHint: View {
             case .phone:
                 Image(systemName: "iphone")
                     .foregroundStyle(.secondary)
-                Text("Tilt to move, swing to hit")
+                Text("Swing it like a bat")
                     .foregroundStyle(.secondary)
             case .computer(let difficulty):
                 Text(difficulty.title)
@@ -369,10 +388,10 @@ private struct ControlsHint: View {
 
     private func spokenHint(for side: Side) -> String {
         switch controls(side) {
-        case .keyboard(let move, let swing):
-            "\(name(side)) moves with \(move.joined(separator: " and ")) and swings with \(swing)."
+        case .keyboard(let aim, let swing):
+            "\(name(side)) aims with \(aim.joined(separator: " and ")) and swings with \(swing) as the ball comes."
         case .phone:
-            "\(name(side)) tilts the iPhone to move and swings it to hit."
+            "\(name(side)) swings the iPhone like a bat."
         case .computer(let difficulty):
             "\(name(side)) plays at \(difficulty.title) difficulty."
         }

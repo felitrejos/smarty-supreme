@@ -79,7 +79,7 @@ private struct PaddleRows: View {
             PositionBar(position: paddle.position)
                 .frame(width: 160)
         }
-        LabeledContent("Tilt range", value: paddle.sensitivity.map { "±\(Int($0.rangeDegrees))°" } ?? "Not calibrated")
+        LabeledContent("Calibration", value: paddle.isCalibrated ? "Done" : "Not calibrated")
         LabeledContent("Ready", value: paddle.isReady ? "Yes" : "No")
         LabeledContent("Swings", value: swingText)
     }

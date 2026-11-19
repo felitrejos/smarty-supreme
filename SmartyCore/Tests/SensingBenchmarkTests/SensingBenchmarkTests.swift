@@ -25,22 +25,6 @@ struct SensingBenchmarkTests {
         #expect(p95 <= 20_000)
     }
 
-    @Test func pointerJitterAtRestIsUnderFourTenthsOfAPercentAtTheHighestSensitivity() throws {
-        let stillRecordings = try HoldoutSet.recordings().filter { $0.activity == .still }
-        try #require(!stillRecordings.isEmpty)
-        let jitters = try stillRecordings.map { recording in
-            var mapper = PointerMapper(neutralRollDegrees: recording.frames[0].motion.rollDegrees, sensitivity: .high)
-            let positions = recording.frames.compactMap { frame -> Double? in
-                guard case .position(let value) = mapper.update(frame.motion, holding: false) else { return nil }
-                return value
-            }.dropFirst(50)
-            try #require(!positions.isEmpty, "A still recording has no upright frames")
-            return rootMeanSquareDeviation(Array(positions))
-        }
-        let worst = jitters.max()!
-        print("Pointer jitter at rest on held-out set: worst \(worst * 100)% of table width")
-        #expect(worst <= 0.004)
-    }
 }
 
 enum HoldoutSet {
@@ -109,9 +93,4 @@ struct DetectionScore {
             }
             .sorted { $0.start < $1.start }
     }
-}
-
-private func rootMeanSquareDeviation(_ values: [Double]) -> Double {
-    let mean = values.reduce(0, +) / Double(values.count)
-    return (values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count)).squareRoot()
 }

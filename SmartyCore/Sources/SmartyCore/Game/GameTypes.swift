@@ -1,3 +1,5 @@
+import simd
+
 public struct Score: Equatable, Sendable {
     public private(set) var a: Int
     public private(set) var b: Int
@@ -48,6 +50,24 @@ public struct Swing: Equatable, Sendable {
     }
 }
 
+public struct RacketSample: Equatable, Sendable {
+    public let side: Side
+    public let step: UInt64
+    public let orientation: simd_quatd
+    public let velocity: SIMD3<Double>
+
+    public init(side: Side, step: UInt64, orientation: simd_quatd, velocity: SIMD3<Double>) {
+        self.side = side
+        self.step = step
+        self.orientation = orientation
+        self.velocity = velocity
+    }
+
+    public var speed: Double {
+        simd_length(velocity)
+    }
+}
+
 public enum GameCommand: Equatable, Sendable {
     case pause
     case resume
@@ -58,12 +78,14 @@ public struct StepInput: Sendable {
     public var targetA: Double?
     public var targetB: Double?
     public var swings: [Swing]
+    public var rackets: [RacketSample]
     public var command: GameCommand?
 
-    public init(targetA: Double? = nil, targetB: Double? = nil, swings: [Swing] = [], command: GameCommand? = nil) {
+    public init(targetA: Double? = nil, targetB: Double? = nil, swings: [Swing] = [], rackets: [RacketSample] = [], command: GameCommand? = nil) {
         self.targetA = targetA
         self.targetB = targetB
         self.swings = swings
+        self.rackets = rackets
         self.command = command
     }
 }
@@ -73,7 +95,8 @@ public enum GameEvent: Equatable, Sendable {
     case hit(Side, strength: Double, rally: Int)
     case edgeHit(Side)
     case whiff(Side)
-    case wallBounce
+    case bounce(Side)
+    case net
     case pointScored(winner: Side, score: Score)
     case gameOver(winner: Side)
     case paused

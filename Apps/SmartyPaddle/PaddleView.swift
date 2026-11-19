@@ -71,7 +71,7 @@ struct PaddleView: View {
     }
 
     private func tilt(_ snapshot: PaddleSensing.Snapshot) -> Double {
-        guard case .position(let position) = snapshot.reading else { return 0 }
+        guard let position = snapshot.touchPosition else { return 0 }
         return (position - 0.5) * Paddle.maximumTilt * 2
     }
 
@@ -83,11 +83,9 @@ struct PaddleView: View {
                 .foregroundStyle(Paddle.Tone.cream)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, minHeight: 44)
-            if isMotionAvailable {
-                Groove(reading: snapshot.reading)
-            } else {
+            if !isMotionAvailable {
                 GeometryReader { geometry in
-                    Groove(reading: snapshot.reading)
+                    Groove(position: snapshot.touchPosition)
                         .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
                             controller.dragPaddle(to: drag.location.x, across: geometry.size.width)
                         })
@@ -123,7 +121,7 @@ struct PaddleView: View {
         }
         switch snapshot.calibration {
         case .needed:
-            return "Hold the phone upright, pointing at the middle of the screen, and tap Calibrate."
+            return "Hold the phone like a bat: bottom in your palm, top pointing up, screen facing the Mac. Then tap Calibrate."
         case .inProgress:
             return "Hold still…"
         case .failed(.handMoved):
@@ -131,7 +129,7 @@ struct PaddleView: View {
         case .failed(.notUpright):
             return "Hold the phone upright and try again."
         case .calibrated:
-            return snapshot.reading == .notUpright ? "Hold it upright" : "Tilt to move, swing to hit. Double-tap to recalibrate."
+            return "Swing it like a bat. Angle the face to place it, brush up for topspin. Double-tap to recalibrate."
         }
     }
 }
@@ -411,7 +409,7 @@ private struct LinkHeader: View {
 }
 
 private struct Groove: View {
-    let reading: PointerReading?
+    let position: Double?
 
     var body: some View {
         GeometryReader { geometry in
@@ -420,7 +418,7 @@ private struct Groove: View {
                 Capsule()
                     .fill(.black.opacity(0.35))
                     .overlay(Capsule().strokeBorder(.white.opacity(0.08), lineWidth: 1))
-                if case .position(let position) = reading {
+                if let position {
                     Capsule()
                         .fill(Paddle.Tone.cream)
                         .frame(width: puck)
@@ -430,7 +428,6 @@ private struct Groove: View {
             }
         }
         .frame(height: Paddle.grooveHeight)
-        .opacity(reading == .notUpright ? 0.4 : 1)
         .accessibilityLabel("Paddle position")
     }
 }

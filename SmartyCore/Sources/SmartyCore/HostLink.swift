@@ -1,4 +1,5 @@
 import Foundation
+import simd
 import Synchronization
 
 public final class HostLink: Sendable {
@@ -6,16 +7,25 @@ public final class HostLink: Sendable {
     public static let roundTripHistory = 600
     private static let pointerRateWindow: Microseconds = 1_000_000
     private static let recentRoundTrips = 5
+    private static let racketBacklog = 64
 
     public struct ReceivedSwing: Equatable, Sendable {
         public let macPeakTime: Microseconds?
         public let strength: Double
     }
 
+    public struct ReceivedRacket: Equatable, Sendable {
+        public let macTime: Microseconds?
+        public let orientation: simd_quatd
+        public let velocity: SIMD3<Double>
+    }
+
     public struct PaddleInput: Equatable, Sendable {
         public let position: Double?
         public let lastPointerAt: Microseconds?
+        public let lastRacketAt: Microseconds?
         public let swings: [ReceivedSwing]
+        public let rackets: [ReceivedRacket]
         public let isCalibrated: Bool
         public let isReady: Bool
         public let pauseRequests: [Bool]
@@ -32,7 +42,7 @@ public final class HostLink: Sendable {
         public let peer: PeerID
         public let name: String
         public let side: Side
-        public let sensitivity: Sensitivity?
+        public let isCalibrated: Bool
         public let position: Double?
         public let pointerRate: Int
         public let roundTrips: [Microseconds]
@@ -49,7 +59,7 @@ public final class HostLink: Sendable {
     private struct Paddle: Sendable {
         let name: String
         var side: Side
-        var sensitivity: Sensitivity?
+        var isCalibrated = false
         var position: Double?
         var lastPointerSequence: UInt32?
         var lastPointerAt: Microseconds?
@@ -61,6 +71,8 @@ public final class HostLink: Sendable {
         var swingCount = 0
         var lastSwing: ReceivedSwing?
         var untakenSwings: [ReceivedSwing] = []
+        var untakenRackets: [ReceivedRacket] = []
+        var lastRacketAt: Microseconds?
         var isReady = false
         var untakenPauseRequests: [Bool] = []
 
@@ -125,7 +137,7 @@ public final class HostLink: Sendable {
                         peer: peer,
                         name: paddle.name,
                         side: paddle.side,
-                        sensitivity: paddle.sensitivity,
+                        isCalibrated: paddle.isCalibrated,
                         position: paddle.position,
                         pointerRate: paddle.pointerArrivals.filter { $0 + Self.pointerRateWindow > now }.count,
                         roundTrips: paddle.roundTrips,
@@ -157,13 +169,16 @@ public final class HostLink: Sendable {
                 paddles[paddle.side] = PaddleInput(
                     position: paddle.position,
                     lastPointerAt: paddle.lastPointerAt,
+                    lastRacketAt: paddle.lastRacketAt,
                     swings: paddle.untakenSwings,
-                    isCalibrated: paddle.sensitivity != nil,
+                    rackets: paddle.untakenRackets,
+                    isCalibrated: paddle.isCalibrated,
                     isReady: paddle.isReady,
                     pauseRequests: paddle.untakenPauseRequests,
                     roundTrip: paddle.recentRoundTrip
                 )
                 state.paddles[peer]?.untakenSwings.removeAll()
+                state.paddles[peer]?.untakenRackets.removeAll()
                 state.paddles[peer]?.untakenPauseRequests.removeAll()
             }
             return Input(paddles: paddles, vacant: Set(state.vacancies.keys), viewerName: state.viewer?.name)
@@ -314,6 +329,20 @@ public final class HostLink: Sendable {
                 paddle.position = Double(position)
                 paddle.lastPointerAt = receivedAt
             }
+        case .racket(let racket):
+            paddle.pointerArrivals.removeAll { $0 + Self.pointerRateWindow <= receivedAt }
+            paddle.pointerArrivals.append(receivedAt)
+            paddle.lastPointerAt = receivedAt
+            paddle.lastRacketAt = receivedAt
+            let q = racket.orientation
+            paddle.untakenRackets.append(ReceivedRacket(
+                macTime: paddle.clockSync.macTime(forPeerTime: racket.sampledAt),
+                orientation: simd_quatd(ix: Double(q.x), iy: Double(q.y), iz: Double(q.z), r: Double(q.w)),
+                velocity: SIMD3<Double>(racket.velocity)
+            ))
+            if paddle.untakenRackets.count > Self.racketBacklog {
+                paddle.untakenRackets.removeFirst()
+            }
         case .swing(let swing):
             let received = ReceivedSwing(
                 macPeakTime: paddle.clockSync.macTime(forPeerTime: swing.peakAt),
@@ -322,8 +351,8 @@ public final class HostLink: Sendable {
             paddle.swingCount += 1
             paddle.lastSwing = received
             paddle.untakenSwings.append(received)
-        case .calibrated(let sensitivity):
-            paddle.sensitivity = sensitivity
+        case .calibrated:
+            paddle.isCalibrated = true
         case .ready(let isReady):
             paddle.isReady = isReady
         case .pause(let pause):

@@ -20,6 +20,8 @@ public final class HostSession {
     private var unsimulatedSeconds = 0.0
     private var pendingCommand: GameCommand?
     private var pendingSwings: [Swing] = []
+    private var pendingRackets: [RacketSample] = []
+    private var autoMove: [Side: (flight: UInt64, target: Double)] = [:]
     private var matchPhones: Set<Side> = []
     private var reconnectDeadlines: [Side: Microseconds] = [:]
     private var heldInterruption: Interruption?
@@ -150,6 +152,7 @@ public final class HostSession {
         }
         if gap <= config.longestFrame {
             queuePhoneSwings()
+            queuePhoneRackets()
         }
         pendingSwings += local.swings.filter { controller(of: $0.side) == .local }
         unsimulatedSeconds += Double(min(gap, config.longestFrame)) / 1_000_000
@@ -319,8 +322,30 @@ public final class HostSession {
     }
 
     private func phoneTarget(for side: Side) -> Double? {
-        guard mode.phoneSides.contains(side), let position = input.paddles[side]?.position else { return nil }
+        guard mode.phoneSides.contains(side), let paddle = input.paddles[side] else { return nil }
+        if paddle.lastRacketAt != nil {
+            return autoMoveTarget(for: side)
+        }
+        guard let position = paddle.position else { return nil }
         return side == .playerA ? position : 1 - position
+    }
+
+    private func autoMoveTarget(for side: Side) -> Double {
+        let flight = game.flightNumber
+        if autoMove[side]?.flight != flight {
+            let x = game.predictedContact(for: side)?.position.x ?? game.config.tableWidth / 2
+            autoMove[side] = (flight, game.config.position(ofPaddleX: x))
+        }
+        return autoMove[side]?.target ?? 0.5
+    }
+
+    private func queuePhoneRackets() {
+        for side in Side.allCases where controller(of: side) == .phone {
+            for racket in input.paddles[side]?.rackets ?? [] {
+                let step = racket.macTime.map(timeline.step(at:)) ?? game.step
+                pendingRackets.append(RacketSample(side: side, step: step, orientation: racket.orientation, velocity: racket.velocity))
+            }
+        }
     }
 
     private func queuePhoneSwings() {
@@ -338,11 +363,13 @@ public final class HostSession {
         defer {
             pendingCommand = nil
             pendingSwings.removeAll()
+            pendingRackets.removeAll()
         }
         return StepInput(
             targetA: target(for: .playerA, local: local),
             targetB: computer == nil ? target(for: .playerB, local: local) : move?.target,
             swings: pendingSwings + (move?.swing.map { [$0] } ?? []),
+            rackets: pendingRackets,
             command: command
         )
     }
@@ -460,9 +487,9 @@ public final class HostSession {
     private var snapshot: TableSnapshot {
         TableSnapshot(
             step: game.step,
-            ball: SIMD2<Float>(game.ball.position),
-            velocity: SIMD2<Float>(game.ball.velocity),
-            shotStart: SIMD2<Float>(game.shotStart),
+            ball: SIMD3<Float>(game.ball.position),
+            velocity: SIMD3<Float>(game.ball.velocity),
+            spin: SIMD3<Float>(game.ball.spin),
             paddleA: Float(game.paddleX(of: .playerA)),
             paddleB: Float(game.paddleX(of: .playerB)),
             phase: tablePhase,

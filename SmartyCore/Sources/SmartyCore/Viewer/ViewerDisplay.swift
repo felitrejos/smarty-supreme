@@ -9,9 +9,8 @@ public struct ViewerConfig: Sendable {
 
 public struct ViewerDisplay: Sendable {
     public struct Frame: Equatable, Sendable {
-        public let ball: SIMD2<Double>
-        public let velocity: SIMD2<Double>
-        public let shotStart: SIMD2<Double>
+        public let ball: SIMD3<Double>
+        public let velocity: SIMD3<Double>
         public let paddleA: Double
         public let paddleB: Double
         public let phase: GamePhase
@@ -24,7 +23,7 @@ public struct ViewerDisplay: Sendable {
     private let config: GameConfig
     private let viewerConfig: ViewerConfig
     private var source: ViewerLink.ReceivedSnapshot?
-    private var offset = SIMD2<Double>.zero
+    private var offset = SIMD3<Double>.zero
     private var lastFrameAt: Microseconds?
 
     public init(config: GameConfig, viewerConfig: ViewerConfig = ViewerConfig()) {
@@ -33,9 +32,9 @@ public struct ViewerDisplay: Sendable {
     }
 
     public mutating func frame(from latest: ViewerLink.ReceivedSnapshot, at now: Microseconds) -> Frame {
-        let truth = position(of: latest, at: now)
+        let truth = ball(of: latest, at: now)
         if let source, source.snapshot.step != latest.snapshot.step {
-            offset += position(of: source, at: now) - truth
+            offset += ball(of: source, at: now).position - truth.position
             if source.snapshot.phase != .rally || latest.snapshot.phase != .rally || simd_length(offset) > viewerConfig.snapDistance {
                 offset = .zero
             }
@@ -48,9 +47,8 @@ public struct ViewerDisplay: Sendable {
         offset = length <= correction ? .zero : offset * ((length - correction) / length)
         let snapshot = latest.snapshot
         return Frame(
-            ball: truth + offset,
-            velocity: SIMD2<Double>(snapshot.velocity),
-            shotStart: SIMD2<Double>(snapshot.shotStart),
+            ball: truth.position + offset,
+            velocity: truth.velocity,
             paddleA: Double(snapshot.paddleA),
             paddleB: Double(snapshot.paddleB),
             phase: snapshot.phase,
@@ -61,11 +59,15 @@ public struct ViewerDisplay: Sendable {
         )
     }
 
-    private func position(of received: ViewerLink.ReceivedSnapshot, at now: Microseconds) -> SIMD2<Double> {
+    private func ball(of received: ViewerLink.ReceivedSnapshot, at now: Microseconds) -> Ball {
         let snapshot = received.snapshot
-        let ball = SIMD2<Double>(snapshot.ball)
+        var ball = Ball(position: SIMD3<Double>(snapshot.ball), velocity: SIMD3<Double>(snapshot.velocity), spin: SIMD3<Double>(snapshot.spin))
         guard snapshot.phase == .rally, now > received.receivedAt else { return ball }
-        let path = BallPath(position: ball, velocity: SIMD2<Double>(snapshot.velocity), config: config)
-        return path.position(after: Double(now - received.receivedAt) / 1_000_000)
+        let elapsed = Double(now - received.receivedAt) / 1_000_000 * config.timeScale
+        let steps = min(Int(elapsed / config.physicsStep), config.stepsPerSecond)
+        for _ in 0..<steps {
+            _ = BallPhysics.advance(&ball, seconds: config.physicsStep, config: config)
+        }
+        return ball
     }
 }

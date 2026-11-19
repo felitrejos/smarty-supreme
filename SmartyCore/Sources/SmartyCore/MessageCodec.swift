@@ -1,7 +1,7 @@
 import Foundation
 
 public enum MessageCodec {
-    public static let protocolVersion: UInt8 = 2
+    public static let protocolVersion: UInt8 = 3
 
     private enum TypeCode: UInt8 {
         case hello = 1
@@ -18,6 +18,7 @@ public enum MessageCodec {
         case viewerHello
         case pause
         case snapshot
+        case racket
     }
 
     public static func encode(_ packet: Packet) -> Data {
@@ -59,6 +60,7 @@ public enum MessageCodec {
         case .viewerHello: .viewerHello
         case .pause: .pause
         case .snapshot: .snapshot
+        case .racket: .racket
         }
     }
 
@@ -66,8 +68,8 @@ public enum MessageCodec {
         switch message {
         case .hello(let name), .helloAck(let name), .viewerHello(let name):
             writer.append(name)
-        case .calibrated(let sensitivity):
-            writer.append(UInt8(sensitivity.rangeDegrees))
+        case .calibrated:
+            break
         case .pointer(let position):
             writer.append(position)
         case .swing(let swing):
@@ -96,11 +98,15 @@ public enum MessageCodec {
             writer.append(state.winner)
         case .bye(let reason):
             writer.append(reason.rawValue)
+        case .racket(let racket):
+            writer.append(racket.sampledAt)
+            writer.append(racket.orientation)
+            writer.append(racket.velocity)
         case .snapshot(let snapshot):
             writer.append(snapshot.step)
             writer.append(snapshot.ball)
             writer.append(snapshot.velocity)
-            writer.append(snapshot.shotStart)
+            writer.append(snapshot.spin)
             writer.append(snapshot.paddleA)
             writer.append(snapshot.paddleB)
             writer.append(snapshot.phase.rawValue)
@@ -119,11 +125,7 @@ public enum MessageCodec {
         case .helloAck:
             return .helloAck(name: try reader.string())
         case .calibrated:
-            let degrees = try reader.byte()
-            guard let sensitivity = Sensitivity.allCases.first(where: { UInt8($0.rangeDegrees) == degrees }) else {
-                throw .invalidPayload
-            }
-            return .calibrated(sensitivity)
+            return .calibrated
         case .pointer:
             return .pointer(position: try reader.unitFloat())
         case .swing:
@@ -156,12 +158,14 @@ public enum MessageCodec {
             return .bye(try reader.enumeration(ByeReason.self))
         case .viewerHello:
             return .viewerHello(name: try reader.string())
+        case .racket:
+            return .racket(RacketMessage(sampledAt: try reader.uint64(), orientation: try reader.finiteQuad(), velocity: try reader.finiteTriple()))
         case .snapshot:
             return .snapshot(TableSnapshot(
                 step: try reader.uint64(),
-                ball: try reader.finitePair(),
-                velocity: try reader.finitePair(),
-                shotStart: try reader.finitePair(),
+                ball: try reader.finiteTriple(),
+                velocity: try reader.finiteTriple(),
+                spin: try reader.finiteTriple(),
                 paddleA: try reader.finiteFloat(),
                 paddleB: try reader.finiteFloat(),
                 phase: try reader.enumeration(GamePhase.self),
@@ -197,6 +201,19 @@ private struct ByteWriter {
     mutating func append(_ value: SIMD2<Float>) {
         append(value.x)
         append(value.y)
+    }
+
+    mutating func append(_ value: SIMD3<Float>) {
+        append(value.x)
+        append(value.y)
+        append(value.z)
+    }
+
+    mutating func append(_ value: SIMD4<Float>) {
+        append(value.x)
+        append(value.y)
+        append(value.z)
+        append(value.w)
     }
 
     mutating func append(_ flag: Bool) {
@@ -250,6 +267,14 @@ private struct ByteReader {
 
     mutating func finitePair() throws(MessageDecodingError) -> SIMD2<Float> {
         SIMD2(try finiteFloat(), try finiteFloat())
+    }
+
+    mutating func finiteTriple() throws(MessageDecodingError) -> SIMD3<Float> {
+        SIMD3(try finiteFloat(), try finiteFloat(), try finiteFloat())
+    }
+
+    mutating func finiteQuad() throws(MessageDecodingError) -> SIMD4<Float> {
+        SIMD4(try finiteFloat(), try finiteFloat(), try finiteFloat(), try finiteFloat())
     }
 
     mutating func optionalSide() throws(MessageDecodingError) -> Side? {

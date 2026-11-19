@@ -74,8 +74,10 @@ struct MatchSetup {
 @MainActor
 @Observable
 final class Match {
-    private static let keyboardStrength = 0.6
-    private static let keyboardAim = 0.6
+    private static let keyboardStrength = 0.45
+    private static let idealLead = 0.25
+    private static let leadWeight = 0.25
+    private static let largestTimingShare = 0.45
 
     private enum Direction {
         case left
@@ -120,6 +122,8 @@ final class Match {
     @ObservationIgnored private var heldA: Set<Direction> = []
     @ObservationIgnored private var heldB: Set<Direction> = []
     @ObservationIgnored private var pendingSwings: [Swing] = []
+    @ObservationIgnored private var readySwings: [Side: (flight: UInt64, at: UInt64, aim: Double)] = [:]
+    @ObservationIgnored private var walkTargets: [Side: (flight: UInt64, target: Double)] = [:]
     private var holds: Set<Hold> = []
 
     init(link: HostLink, clock: any MonotonicClock, defaults: UserDefaults) {
@@ -178,7 +182,8 @@ final class Match {
     func advance() -> [GameEvent] {
         var local = LocalInput()
         for side in Side.allCases where session.controller(of: side) == .local {
-            local.targets[side] = keyboardTarget(for: side)
+            local.targets[side] = walkTarget(for: side)
+            fireReadySwing(for: side)
         }
         local.swings = pendingSwings
         pendingSwings.removeAll()
@@ -387,20 +392,43 @@ final class Match {
     }
 
     private func swing(_ side: Side) {
-        pendingSwings.append(Swing(side: side, step: session.game.step, strength: Self.keyboardStrength, aim: steering(held(side)) * Self.keyboardAim))
+        let game = session.game
+        let aim = steering(held(side)) * (facesPlayerBEnd(side) ? -1 : 1)
+        if case .serving(side, _) = game.phase {
+            pendingSwings.append(Swing(side: side, step: game.step, strength: Self.keyboardStrength, aim: aim))
+            return
+        }
+        guard readySwings[side]?.flight != game.flightNumber, let contact = game.predictedContact(for: side) else { return }
+        let config = game.config
+        let contactStep = Double(game.step + contact.stepsAway)
+        let earliness = Double(contact.stepsAway) / Double(config.stepsPerSecond) - Self.idealLead
+        let largest = config.swingWindow * Self.largestTimingShare
+        let offset = min(max(-earliness * Self.leadWeight, -largest), largest) * Double(config.stepsPerSecond)
+        readySwings[side] = (game.flightNumber, UInt64(max(contactStep + offset, Double(game.step)).rounded()), aim)
+    }
+
+    private func fireReadySwing(for side: Side) {
+        let game = session.game
+        guard let ready = readySwings[side], ready.flight == game.flightNumber, game.step >= ready.at else { return }
+        readySwings[side] = nil
+        pendingSwings.append(Swing(side: side, step: ready.at, strength: Self.keyboardStrength, aim: ready.aim))
+    }
+
+    private func walkTarget(for side: Side) -> Double {
+        let game = session.game
+        if walkTargets[side]?.flight != game.flightNumber {
+            let x = game.predictedContact(for: side)?.position.x ?? game.config.tableWidth / 2
+            walkTargets[side] = (game.flightNumber, game.config.position(ofPaddleX: x))
+        }
+        return walkTargets[side]?.target ?? 0.5
+    }
+
+    private func facesPlayerBEnd(_ side: Side) -> Bool {
+        side == .playerB && [.split, .playerBEnd].contains(camera)
     }
 
     private func held(_ side: Side) -> Set<Direction> {
         side == .playerA ? heldA : heldB
-    }
-
-    private func keyboardTarget(for side: Side) -> Double {
-        let facesPlayerBEnd = side == .playerB && [.split, .playerBEnd].contains(camera)
-        return switch steering(held(side)) * (facesPlayerBEnd ? -1 : 1) {
-        case ..<0: 0
-        case 0: session.game.paddlePosition(of: side)
-        default: 1
-        }
     }
 
     private func steering(_ held: Set<Direction>) -> Double {
