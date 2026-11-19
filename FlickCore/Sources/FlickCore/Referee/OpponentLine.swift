@@ -15,19 +15,19 @@ public enum OpponentLine: CaseIterable, Sendable {
 
     public var lines: [String] {
         switch self {
-        case .wonTheGame: ["Good game. Better luck next time.", "And that’s the match. Rematch?", "Too easy. Just kidding, well played."]
-        case .lostTheGame: ["Well played. I want a rematch.", "You got me. Good game.", "Fine, you win this one."]
-        case .hasMatchPoint: ["One more point and it’s mine.", "Match point. No pressure.", "Almost there."]
-        case .facesMatchPoint: ["It’s not over yet.", "I can still come back.", "Don’t celebrate yet."]
-        case .smashWinner: ["Too fast for you?", "Did you see that one?", "Boom."]
-        case .theyWhiffed: ["Missed me!", "Swing and a miss.", "Close, but no."]
-        case .whiffed: ["I’ll get the next one.", "Nobody saw that.", "My paddle slipped."]
-        case .beatenBySmash: ["Ouch. Nice shot.", "How am I supposed to return that?", "Okay, that one was fast."]
-        case .beatenByEdge: ["Off the edge? Lucky.", "That edge was pure luck.", "Really? The edge?"]
-        case .wonALongRally: ["What a rally. Mine, though.", "I could do this all day.", "You almost had me."]
-        case .lostALongRally: ["Okay, that was a good rally.", "Fine, you earned that one.", "I’m getting tired."]
-        case .wonAPoint: ["Mine.", "Point to me.", "Keep up!"]
-        case .lostAPoint: ["Nice one.", "Lucky.", "Hmm."]
+        case .wonTheGame: ["Good game. Skill issue, honestly.", "It's so over for you.", "Touch grass, then we run it back."]
+        case .lostTheGame: ["Okay, you cooked. Good game.", "It's so over. Rematch?", "Ratioed by a human. Wild."]
+        case .hasMatchPoint: ["One more and you're cooked.", "We are so back.", "Match point. Stay humble."]
+        case .facesMatchPoint: ["Down bad, but not out.", "Don't count me out yet.", "Comeback arc starts now."]
+        case .smashWinner: ["Let him cook.", "Absolute cinema.", "That's a ten x shot."]
+        case .theyWhiffed: ["Skill issue.", "Big swing, zero contact.", "Air ball, no cap."]
+        case .whiffed: ["Lag. Definitely lag.", "That one didn't count.", "My model hallucinated."]
+        case .beatenBySmash: ["Okay, that was clean.", "You're actually him.", "Fine, that's a W."]
+        case .beatenByEdge: ["An edge? That's a bug, not a feature.", "Pure luck, not gonna lie.", "Lucky edge. Cope."]
+        case .wonALongRally: ["Built different.", "I could do this all day.", "Living rent free in your head."]
+        case .lostALongRally: ["Okay, respect.", "That rally was peak.", "Fine, you earned that one."]
+        case .wonAPoint: ["Mine.", "Too easy.", "Another W."]
+        case .lostAPoint: ["Lucky.", "Mid.", "Cope."]
         }
     }
 }

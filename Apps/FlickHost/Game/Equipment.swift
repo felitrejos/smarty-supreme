@@ -132,14 +132,15 @@ enum Equipment {
         }
 
         private static let adverts = [
-            Textures.Advert(words: "JAQUES · LONDON", font: "Futura-Bold", board: (0.09, 0.13, 0.2), ink: (0.93, 0.88, 0.76)),
-            Textures.Advert(words: "HALEX", font: "Futura-CondensedExtraBold", board: (0.55, 0.1, 0.08), ink: (0.96, 0.9, 0.78)),
-            Textures.Advert(words: "DUNLOP", font: "Futura-CondensedExtraBold", board: (0.88, 0.75, 0.3), ink: (0.12, 0.1, 0.08)),
-            Textures.Advert(words: "Guinness is good for you", font: "Didot-Bold", board: (0.08, 0.07, 0.06), ink: (0.88, 0.8, 0.6)),
-            Textures.Advert(words: "SLAZENGER", font: "GillSans-Bold", board: (0.12, 0.25, 0.18), ink: (0.95, 0.9, 0.78)),
-            Textures.Advert(words: "BOVRIL", font: "Futura-CondensedExtraBold", board: (0.88, 0.84, 0.74), ink: (0.6, 0.1, 0.08)),
-            Textures.Advert(words: "BARNA BATS", font: "GillSans-UltraBold", board: (0.09, 0.13, 0.2), ink: (0.86, 0.71, 0.42)),
-            Textures.Advert(words: "SCHWEPPES", font: "Didot-Bold", board: (0.9, 0.82, 0.45), ink: (0.1, 0.1, 0.12)),
+            Textures.Advert(words: "OpenAI · SAN FRANCISCO", font: "Futura-Bold", board: (0.09, 0.13, 0.2), ink: (0.93, 0.88, 0.76)),
+            Textures.Advert(words: "NVIDIA", font: "Futura-CondensedExtraBold", board: (0.24, 0.36, 0.12), ink: (0.95, 0.92, 0.8)),
+            Textures.Advert(words: "Claude is good for you", font: "Didot-Bold", board: (0.08, 0.07, 0.06), ink: (0.88, 0.8, 0.6)),
+            Textures.Advert(words: "HUGGING FACE", font: "GillSans-UltraBold", board: (0.88, 0.75, 0.3), ink: (0.12, 0.1, 0.08)),
+            Textures.Advert(words: "DEEPMIND", font: "Futura-CondensedExtraBold", board: (0.55, 0.1, 0.08), ink: (0.96, 0.9, 0.78)),
+            Textures.Advert(words: "ANTHROPIC", font: "GillSans-Bold", board: (0.88, 0.84, 0.74), ink: (0.6, 0.25, 0.12)),
+            Textures.Advert(words: "MISTRAL · PARIS", font: "Didot-Bold", board: (0.9, 0.82, 0.45), ink: (0.1, 0.1, 0.12)),
+            Textures.Advert(words: "PERPLEXITY", font: "Futura-Bold", board: (0.12, 0.25, 0.18), ink: (0.95, 0.9, 0.78)),
+            Textures.Advert(words: "CURSOR", font: "GillSans-UltraBold", board: (0.09, 0.13, 0.2), ink: (0.86, 0.71, 0.42)),
         ]
 
         private static func stampMaterial(_ image: CGImage) async throws -> PhysicallyBasedMaterial {

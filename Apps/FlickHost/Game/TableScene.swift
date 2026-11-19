@@ -258,15 +258,22 @@ final class TableScene {
             let toward: Double = side == .playerA ? -1 : 1
             let approaching = pose.isRally && pose.velocity.y * toward > 0
             let secondsToContact = approaching ? Float((config.paddleFaceY(of: side) - pose.ball.y) / pose.velocity.y) : nil
-            let across = (sceneX(pose.ball.x) - motion.x) * (side == .playerA ? 1 : -1)
-            motion.update(target: target, ballAcross: across, secondsToContact: secondsToContact, elapsed: seconds)
+            let mirror: Float = side == .playerA ? 1 : -1
+            let across = (sceneX(pose.ball.x) - motion.x) * mirror
+            let contactAcross = secondsToContact.map { seconds in
+                let path = BallPath(position: pose.ball, velocity: pose.velocity, config: config)
+                return (sceneX(path.position(after: Double(seconds)).x) - motion.x) * mirror
+            }
+            motion.update(target: target, ballAcross: across, contactAcross: contactAcross, secondsToContact: secondsToContact, elapsed: seconds)
             motions[side] = motion
             let speed = motion.lateralSpeed * (side == .playerA ? 1 : -1)
             let roll = min(max(speed * Self.paddleRollPerSpeed, -Self.maximumRoll), Self.maximumRoll)
             let pose3 = motion.pose()
             paddle.root.position = [motion.x, Size.tableHeight + Arc.paddleHeight + abs(speed) * Self.paddleLiftPerSpeed, sceneZ(config.paddleFaceY(of: side)) + behind]
-            paddle.pivot.position = SIMD3(0, -Size.grip, 0) + pose3.offset
-            paddle.pivot.orientation = simd_quatf(angle: -lean(of: side, in: pose) - roll, axis: [0, 0, 1]) * pose3.orientation
+            let tilt = -lean(of: side, in: pose) - roll
+            let bladeShift = Size.grip * sin(tilt) * motion.reachWeight
+            paddle.pivot.position = SIMD3(bladeShift, -Size.grip, 0) + pose3.offset
+            paddle.pivot.orientation = simd_quatf(angle: tilt, axis: [0, 0, 1]) * pose3.orientation
             paddle.root.components.set(OpacityComponent(opacity: pose.dimmed.contains(side) ? Self.dimmedOpacity : 1))
         }
         ball.position = ballPosition

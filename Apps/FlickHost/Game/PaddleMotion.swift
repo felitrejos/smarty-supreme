@@ -9,12 +9,16 @@ struct PaddleMotion {
     private static let strike: Float = 0.09
     private static let followThrough: Float = 0.2
     private static let recovery: Float = 0.42
+    private static let reachRate: Float = 18
+    private static let farthestReach: Float = 0.3
 
     private(set) var x: Float
     private var velocity: Float = 0
     private var backhand: Float = 0
     private var windUp: Float = 0
     private var stroke: (elapsed: Float, strength: Float, backhand: Float)?
+    private var reach: Float = 0
+    private(set) var reachWeight: Float = 0
 
     init(x: Float) {
         self.x = x
@@ -25,7 +29,7 @@ struct PaddleMotion {
         windUp = 0
     }
 
-    mutating func update(target: Float, ballAcross: Float, secondsToContact: Float?, elapsed: Float) {
+    mutating func update(target: Float, ballAcross: Float, contactAcross: Float?, secondsToContact: Float?, elapsed: Float) {
         let acceleration = Self.stiffness * Self.stiffness * (target - x) - 2 * Self.stiffness * velocity
         velocity += acceleration * elapsed
         x += velocity * elapsed
@@ -39,6 +43,12 @@ struct PaddleMotion {
             let next = current.elapsed + elapsed
             stroke = next < Self.recovery ? (next, current.strength, current.backhand) : nil
         }
+        let holding = stroke.map { $0.elapsed < Self.followThrough } ?? false
+        let reaching = holding || (secondsToContact.map { $0 < Self.windUpLead } ?? false)
+        if !holding, reaching, let contactAcross {
+            reach += (min(max(contactAcross, -Self.farthestReach), Self.farthestReach) - reach) * min(Self.reachRate * elapsed, 1)
+        }
+        reachWeight += ((reaching ? 1 : 0) - reachWeight) * min(Self.reachRate * elapsed, 1)
     }
 
     var lateralSpeed: Float {
@@ -72,10 +82,11 @@ struct PaddleMotion {
                 swing = 1.35 * settle
                 rise = settle
             }
-            offset += [0.12 * strokeFace * swing, 0.14 * rise, -0.2 * min(swing, 1)] * power
+            offset += [0, 0.14 * rise, -0.2 * min(swing, 1)] * power
             yaw += 0.6 * strokeFace * swing * power
             pitch -= 0.5 * min(swing, 1) * power
         }
+        offset.x += reach * reachWeight
         let orientation = simd_quatf(angle: yaw, axis: [0, 1, 0]) * simd_quatf(angle: -pitch, axis: [1, 0, 0])
         return (offset, orientation)
     }
