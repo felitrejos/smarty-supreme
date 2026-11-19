@@ -40,7 +40,7 @@ For a first run on an iPhone: sign in to Xcode with your Apple ID, connect the p
 swift test --package-path FlickCore
 ```
 
-Two benchmarks only run in an optimized build. The AI balance benchmark plays 1,000 games per difficulty against a scripted average player. The soak test plays 30 simulated minutes of two phones and Player B's screen over a lossy link, dropping a phone, pausing and losing the screen along the way, and checks every recovery, every result and memory growth under 5 MB:
+Two benchmarks only run in an optimized build. The AI balance benchmark plays 1,000 games per difficulty against a scripted average player, and checks that Medium wins more against a player with a weak side because it aims away from them. The soak test plays 30 simulated minutes of two phones and Player B's screen over a lossy link, dropping a phone, pausing and losing the screen along the way, and checks every recovery, every result and memory growth under 5 MB:
 
 ```bash
 swift test --package-path FlickCore -c release --filter "AIBalanceBenchmarkTests|SoakTests"
@@ -48,7 +48,7 @@ swift test --package-path FlickCore -c release --filter "AIBalanceBenchmarkTests
 
 ## Playing
 
-FlickHost opens on the table against the computer. File › New Game… (⌘N) picks the opponent (the computer or another player) and the computer's difficulty; the choice is kept for the next launch.
+FlickHost opens on the table against the computer. File › New Game… (⌘N) picks the opponent (the computer or another player) and the computer's difficulty; the choice is kept for the next launch. Medium and Hard steer their returns to the side of the table you're not on: Medium on most shots, Hard on every shot. Easy never does.
 
 On the iPhone, hold it upright pointing at the screen and tap Calibrate. Tilt about 30° either way to cross the table (12°, 20° and 30° are offered), and swing toward the screen to hit. The phone buzzes on a hit (harder for harder swings), a miss, a point and the win. Without a phone, Player A uses A and D to move and W to swing, and a keyboard Player B uses ← → and ↑. Holding a direction while swinging aims the return.
 

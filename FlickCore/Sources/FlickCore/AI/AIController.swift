@@ -9,8 +9,11 @@ public struct AIController: Sendable {
     private struct Plan: Sendable {
         let paddleX: Double
         let swingAt: UInt64
+        let aim: Double
         var hasSwung = false
     }
+
+    private static let steeringContact = 0.6
 
     private let side: Side
     private let profile: AIProfile
@@ -43,7 +46,7 @@ public struct AIController: Sendable {
             if let plan {
                 goal = plan.paddleX
                 if !plan.hasSwung, game.step >= plan.swingAt {
-                    swing = makeSwing(in: game)
+                    swing = makeSwing(in: game, aim: plan.aim)
                     self.plan?.hasSwung = true
                 }
             }
@@ -51,7 +54,7 @@ public struct AIController: Sendable {
             approachingSince = nil
             plan = nil
             if case .serving(side, let since) = game.phase, game.step - since >= steps(profile.serveDelay, in: game.config) {
-                swing = makeSwing(in: game)
+                swing = makeSwing(in: game, aim: aim(in: game))
             }
         }
         let next = moved(current, toward: goal, in: game.config)
@@ -69,21 +72,40 @@ public struct AIController: Sendable {
         let zoneMiddle = config.paddleFaceY(of: side) + side.forward * config.zoneDepth(forSpeed: game.ball.speed) / 2
         let seconds = path.secondsUntil(y: zoneMiddle) ?? 0
         let swingSeconds = max(seconds + gaussian() * profile.timingError, 0)
+        let contactX = path.position(after: seconds).x
+        let steering = Double.random(in: 0..<1, using: &random) < profile.aimsAwayShare ? steerAway(from: contactX, in: game) : nil
+        let reach = config.paddleWidth / 2 + config.ballRadius
         return Plan(
-            paddleX: path.position(after: seconds).x + gaussian() * profile.aimError,
-            swingAt: game.step + UInt64((swingSeconds * Double(config.stepsPerSecond)).rounded())
+            paddleX: contactX - (steering?.contact ?? 0) * reach + gaussian() * profile.aimError,
+            swingAt: game.step + UInt64((swingSeconds * Double(config.stepsPerSecond)).rounded()),
+            aim: steering?.aim ?? Double.random(in: -1...1, using: &random)
         )
     }
 
-    private mutating func makeSwing(in game: GameState) -> Swing {
-        let strength = Double.random(in: profile.strength, using: &random)
-        let aim: Double
-        if Double.random(in: 0..<1, using: &random) < profile.aimsAwayShare {
-            aim = game.paddlePosition(of: side.opponent) < 0.5 ? 1 : -1
-        } else {
-            aim = Double.random(in: -1...1, using: &random)
-        }
-        return Swing(side: side, step: game.step, strength: strength, aim: aim)
+    private mutating func aim(in game: GameState) -> Double {
+        Double.random(in: 0..<1, using: &random) < profile.aimsAwayShare
+            ? steerAway(from: game.ball.position.x, in: game).aim
+            : Double.random(in: -1...1, using: &random)
+    }
+
+    private func steerAway(from contactX: Double, in game: GameState) -> (contact: Double, aim: Double) {
+        let config = game.config
+        let target = (game.paddlePosition(of: side.opponent) < 0.5 ? Lane.right : Lane.left).centre(in: config)
+        let distance = abs(config.paddleFaceY(of: side.opponent) - config.paddleFaceY(of: side))
+        let low = config.ballRadius
+        let high = config.tableWidth - config.ballRadius
+        let maximumAngle = config.maximumReturnAngleDegrees * .pi / 180
+        let angles = [target, 2 * low - target, 2 * high - target].map { atan(($0 - contactX) / distance) }
+        let angle = angles.filter { abs($0) <= maximumAngle }.min { abs($0) < abs($1) } ?? 0
+        let aimRange = (1 - config.contactShare) * maximumAngle
+        let aimAngle = min(max(angle, -aimRange), aimRange)
+        guard config.contactShare > 0 else { return (0, aimAngle / aimRange) }
+        let contact = min(max((angle - aimAngle) / (config.contactShare * maximumAngle), -Self.steeringContact), Self.steeringContact)
+        return (contact, aimAngle / aimRange)
+    }
+
+    private mutating func makeSwing(in game: GameState, aim: Double) -> Swing {
+        Swing(side: side, step: game.step, strength: Double.random(in: profile.strength, using: &random), aim: aim)
     }
 
     private func moved(_ x: Double, toward goal: Double, in config: GameConfig) -> Double {

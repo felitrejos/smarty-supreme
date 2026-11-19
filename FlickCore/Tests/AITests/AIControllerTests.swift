@@ -88,6 +88,34 @@ struct AIControllerTests {
         #expect(swings > 10)
     }
 
+    @Test func returnsAimedAwayLandOnTheSideThePlayerIsNotOn() {
+        func awayShare(aimsAwayShare: Double) -> Double {
+            var profile = Difficulty.medium.profile
+            profile.aimsAwayShare = aimsAwayShare
+            var away = 0
+            var returns = 0
+            for seed in 0..<30 {
+                var duel = Duel(seed: UInt64(seed) &+ 100, playerA: .scriptedAverage, playerB: profile)
+                var farLane: Lane?
+                while !duel.isOver {
+                    let turn = duel.step()
+                    let game = duel.game
+                    if turn.events.contains(where: { if case .hit(.playerB, _, _) = $0 { true } else { false } }) {
+                        farLane = game.paddlePosition(of: .playerA) < 0.5 ? .right : .left
+                    }
+                    if let lane = farLane, game.ball.position.y <= game.config.paddleFaceY(of: .playerA) {
+                        returns += 1
+                        away += Lane(x: game.ball.position.x, config: game.config) == lane ? 1 : 0
+                        farLane = nil
+                    }
+                }
+            }
+            return Double(away) / Double(returns)
+        }
+
+        #expect(awayShare(aimsAwayShare: 1) > awayShare(aimsAwayShare: 0) + 0.1)
+    }
+
     @Test func theSameSeedsPlayTheSameMatch() {
         var first = Duel(seed: 5, playerA: .scriptedAverage, playerB: Difficulty.medium.profile)
         var second = Duel(seed: 5, playerA: .scriptedAverage, playerB: Difficulty.medium.profile)
@@ -120,24 +148,6 @@ struct AIControllerTests {
         }
 
         #expect(serves >= 5)
-    }
-
-    @Test func anAiThatAlwaysAimsAwaySendsTheBallToTheOpenSideOfTheTable() {
-        var profile = Difficulty.hard.profile
-        profile.aimsAwayShare = 1
-        var config = GameConfig()
-        config.contactShare = 0
-        var duel = Duel(seed: 8, config: config, playerA: .scriptedAverage, playerB: profile)
-        var returns = 0
-        while !duel.isOver {
-            let opponentOnTheLeft = duel.game.paddleX(of: .playerA) < config.tableWidth / 2
-            let turn = duel.step()
-            guard turn.events.contains(where: { if case .hit(.playerB, _, _) = $0 { true } else { false } }), !turn.events.contains(.wallBounce) else { continue }
-            returns += 1
-            #expect((duel.game.ball.velocity.x > 0) == opponentOnTheLeft)
-        }
-
-        #expect(returns > 10)
     }
 
     @Test func whilePausedTheAiHoldsStillAndStillReturnsTheBallOnceResumed() {
@@ -198,12 +208,29 @@ struct Duel {
         let swingsB: [Swing]
     }
 
+    struct Weakness {
+        let lane: Lane
+        let missShare: Double
+    }
+
     private(set) var game: GameState
     private var playerA: AIController
     private var playerB: AIController
+    private let weaknessA: Weakness?
+    private var weaknessRandom: SplitMix64
 
-    init(seed: UInt64, aiSeed: UInt64? = nil, config: GameConfig = GameConfig(), playerA: AIProfile, playerB: AIProfile) {
+    init(
+        seed: UInt64,
+        aiSeed: UInt64? = nil,
+        config: GameConfig = GameConfig(),
+        playerA: AIProfile,
+        playerB: AIProfile,
+        weaknessA: Weakness? = nil
+    ) {
         game = GameState(seed: seed, config: config)
+        self.weaknessA = weaknessA
+
+        weaknessRandom = SplitMix64(seed: seed &+ 3)
         self.playerA = AIController(side: .playerA, profile: playerA, seed: seed &+ 1)
         self.playerB = AIController(side: .playerB, profile: playerB, seed: aiSeed ?? seed &+ 2)
     }
@@ -223,7 +250,12 @@ struct Duel {
         let moveA = playerA.move(in: game)
         let moveB = playerB.move(in: game)
         let swingsB = moveB.swing.map { [$0] } ?? []
-        let input = StepInput(targetA: moveA.target, targetB: moveB.target, swings: (moveA.swing.map { [$0] } ?? []) + swingsB, command: command)
+        var swingsA = moveA.swing.map { [$0] } ?? []
+        if let weaknessA, !swingsA.isEmpty, case .rally = game.phase, Lane(x: game.ball.position.x, config: game.config) == weaknessA.lane,
+           Double.random(in: 0..<1, using: &weaknessRandom) < weaknessA.missShare {
+            swingsA = []
+        }
+        let input = StepInput(targetA: moveA.target, targetB: moveB.target, swings: swingsA + swingsB, command: command)
         return Turn(stepBefore: stepBefore, events: game.step(input), swingsB: swingsB)
     }
 

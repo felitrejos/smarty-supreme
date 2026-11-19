@@ -34,9 +34,9 @@ public enum Difficulty: String, CaseIterable, Sendable {
         case .easy:
             AIProfile(reactionDelay: 0.2, aimError: 0.045, paddleSpeedInTableWidths: 2.0, timingError: 0.045, strength: 0.1...0.4, aimsAwayShare: 0)
         case .medium:
-            AIProfile(reactionDelay: 0.18, aimError: 0.035, paddleSpeedInTableWidths: 2.0, timingError: 0.045, strength: 0.2...0.7, aimsAwayShare: 0.3)
+            AIProfile(reactionDelay: 0.18, aimError: 0.035, paddleSpeedInTableWidths: 2.0, timingError: 0.045, strength: 0.2...0.7, aimsAwayShare: 0.7)
         case .hard:
-            AIProfile(reactionDelay: 0.15, aimError: 0.035, paddleSpeedInTableWidths: 2.2, timingError: 0.042, strength: 0.3...0.8, aimsAwayShare: 0.7)
+            AIProfile(reactionDelay: 0.15, aimError: 0.035, paddleSpeedInTableWidths: 2.2, timingError: 0.042, strength: 0.3...0.8, aimsAwayShare: 1)
         }
     }
 }
