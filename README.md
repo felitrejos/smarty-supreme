@@ -40,10 +40,10 @@ For a first run on an iPhone: sign in to Xcode with your Apple ID, connect the p
 swift test --package-path FlickCore
 ```
 
-The AI balance benchmark plays 1,000 games per difficulty against a scripted average player and only runs in an optimized build:
+Two benchmarks only run in an optimized build. The AI balance benchmark plays 1,000 games per difficulty against a scripted average player. The soak test plays 30 simulated minutes of two phones and Player B's screen over a lossy link, dropping a phone, pausing and losing the screen along the way, and checks every recovery, every result and memory growth under 5 MB:
 
 ```bash
-swift test --package-path FlickCore -c release --filter AIBalanceBenchmarkTests
+swift test --package-path FlickCore -c release --filter "AIBalanceBenchmarkTests|SoakTests"
 ```
 
 ## Playing
@@ -67,6 +67,9 @@ During a match:
 - A swing that tips the phone back keeps the paddle in place; if the phone stays tilted for 0.75 s it asks to be held upright. A paddle dims when its phone stops sending tilt for a quarter of a second, and the game pauses after 2 s.
 - Three serve timeouts in a row from one player pause the game and ask if they are still playing.
 - If Player B's screen disconnects, the game pauses until it comes back, or until both players tap Continue to play on with the side view.
+- The game pauses while the Mac sleeps, its screen is locked, Flick Pong is in the background or the New Game sheet is open, and resumes when you come back.
+
+On an iPhone without motion sensors (the simulator), drag along the bar to move and swipe up to swing.
 
 ## Recording the motion dataset
 
@@ -93,4 +96,6 @@ swift run --package-path FlickCore flick-fixtures split Fixtures/recordings Fixt
 | Round trip p95 at most 15 ms, tilt updates at least 55 a second | The iPhone Paddles window (⌘0), each with a pass or fail mark |
 | 99% of frames under 8.3 ms, none dropped over 60 s | View › Show Frame Times (⌥⌘F), with a Release build in front on a 120 Hz display |
 | Player B's screen within 15 ms of the host (95%) | Show Frame Times on the second Mac |
+| Swing to the game p95, Mac CPU at most 20% of a core, memory growth under 5 MB | Show Frame Times; values over budget turn orange |
+| iPhone CPU at most 15%, battery at most 8% per 30 min | The footer of the paddle app; battery shows while unplugged |
 | Engine step p99 under 0.1 ms | `EngineBenchmarkTests`, part of the test run |
