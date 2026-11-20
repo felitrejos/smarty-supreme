@@ -1,11 +1,15 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/header-dark.png">
-  <img alt="Smarty Supreme" src="docs/brand/header.png">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/header-dark.png">
+    <img alt="Smarty Supreme" src="docs/brand/header.png" width="520">
+  </picture>
+</p>
 
 <p align="center"><b>Table tennis on the Mac. The paddle is your iPhone.</b></p>
 
-![A rally at Player A's end, under the lights of a packed arena](docs/screenshots/rally.gif)
+<p align="center">
+  <img alt="A rally at Player A's end, under the lights of a packed arena" src="docs/screenshots/rally.gif" width="720">
+</p>
 
 Smarty Supreme is a table tennis game for the Mac. You play it by swinging your iPhone as the paddle. The match is in a packed hall, with one table under the lights and an umpire calling every point. Your player walks to the ball automatically, so the timing and the stroke are yours. The computer opponent talks like tech Twitter.
 
