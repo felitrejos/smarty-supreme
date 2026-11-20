@@ -292,4 +292,18 @@ enum Textures {
         stamp("★★★", size: 24, kern: 4, centre: CGPoint(x: 768, y: 226))
         return canvas.image
     }
+
+    @concurrent
+    static func contactRing() async -> CGImage {
+        let canvas = Canvas(width: 256, height: 256)
+        let context = canvas.context
+        context.clear(CGRect(x: 0, y: 0, width: 256, height: 256))
+        context.setStrokeColor(red: 1, green: 1, blue: 1, alpha: 1)
+        context.setLineWidth(9)
+        context.strokeEllipse(in: CGRect(x: 14, y: 14, width: 228, height: 228))
+        context.setLineWidth(3)
+        context.setStrokeColor(red: 1, green: 1, blue: 1, alpha: 0.5)
+        context.strokeEllipse(in: CGRect(x: 104, y: 104, width: 48, height: 48))
+        return canvas.image
+    }
 }

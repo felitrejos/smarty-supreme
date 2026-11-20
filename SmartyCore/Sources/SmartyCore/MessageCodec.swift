@@ -1,7 +1,7 @@
 import Foundation
 
 public enum MessageCodec {
-    public static let protocolVersion: UInt8 = 3
+    public static let protocolVersion: UInt8 = 4
 
     private enum TypeCode: UInt8 {
         case hello = 1
@@ -19,6 +19,8 @@ public enum MessageCodec {
         case pause
         case snapshot
         case racket
+        case incoming
+        case toss
     }
 
     public static func encode(_ packet: Packet) -> Data {
@@ -61,6 +63,8 @@ public enum MessageCodec {
         case .pause: .pause
         case .snapshot: .snapshot
         case .racket: .racket
+        case .incoming: .incoming
+        case .toss: .toss
         }
     }
 
@@ -68,8 +72,8 @@ public enum MessageCodec {
         switch message {
         case .hello(let name), .helloAck(let name), .viewerHello(let name):
             writer.append(name)
-        case .calibrated:
-            break
+        case .calibrated(let handedness):
+            writer.append(handedness.rawValue)
         case .pointer(let position):
             writer.append(position)
         case .swing(let swing):
@@ -80,7 +84,7 @@ public enum MessageCodec {
             writer.append(swing.direction.z)
         case .ready(let flag), .pause(let flag):
             writer.append(flag)
-        case .ping:
+        case .ping, .toss:
             break
         case .pong(let pingSentAt, let receivedAt):
             writer.append(pingSentAt)
@@ -101,7 +105,11 @@ public enum MessageCodec {
         case .racket(let racket):
             writer.append(racket.sampledAt)
             writer.append(racket.orientation)
-            writer.append(racket.velocity)
+            writer.append(racket.angularVelocity)
+            writer.append(racket.linearVelocity)
+            writer.append(racket.reach)
+        case .incoming(let contactAt):
+            writer.append(contactAt)
         case .snapshot(let snapshot):
             writer.append(snapshot.step)
             writer.append(snapshot.ball)
@@ -125,7 +133,7 @@ public enum MessageCodec {
         case .helloAck:
             return .helloAck(name: try reader.string())
         case .calibrated:
-            return .calibrated
+            return .calibrated(try reader.enumeration(Handedness.self))
         case .pointer:
             return .pointer(position: try reader.unitFloat())
         case .swing:
@@ -159,7 +167,17 @@ public enum MessageCodec {
         case .viewerHello:
             return .viewerHello(name: try reader.string())
         case .racket:
-            return .racket(RacketMessage(sampledAt: try reader.uint64(), orientation: try reader.finiteQuad(), velocity: try reader.finiteTriple()))
+            return .racket(RacketMessage(
+                sampledAt: try reader.uint64(),
+                orientation: try reader.finiteQuad(),
+                angularVelocity: try reader.finiteTriple(),
+                linearVelocity: try reader.finiteTriple(),
+                reach: try reader.finiteTriple()
+            ))
+        case .incoming:
+            return .incoming(contactAt: try reader.uint64())
+        case .toss:
+            return .toss
         case .snapshot:
             return .snapshot(TableSnapshot(
                 step: try reader.uint64(),

@@ -8,6 +8,7 @@ final class PaddleController {
     private static let byeDelivery = DispatchTimeInterval.milliseconds(300)
     private static let longestName = 40
     private static let touchStartPosition = 0.5
+    private static let leftHandedKey = "leftHanded"
 
     let sensing = PaddleSensing()
     let link: PaddleLink
@@ -32,11 +33,15 @@ final class PaddleController {
             onHaptic: { [haptics, sensing] kind in
                 let swingStrength = sensing.snapshot.lastSwing?.strength
                 Task { @MainActor in haptics.play(kind, swingStrength: swingStrength) }
+            },
+            onIncoming: { [sensing] time in
+                sensing.expectContact(at: time)
             }
         )
         relay.connect(link.handle)
         self.motion = motion
         self.launchedAt = launchedAt
+        sensing.setHandedness(UserDefaults.standard.bool(forKey: Self.leftHandedKey) ? .left : .right)
     }
 
     func start() {
@@ -51,7 +56,7 @@ final class PaddleController {
             motion.start(onSample: forwardSample, onError: sensing.reportSensorError)
         } else {
             sensing.setTouchPosition(Self.touchStartPosition)
-            link.announceCalibration()
+            link.announceCalibration(sensing.snapshot.handedness)
         }
         pointerTimer = makePointerTimer()
         haptics.prepare()
@@ -64,6 +69,14 @@ final class PaddleController {
         let disconnect = DispatchWorkItem { [transport] in transport.stop() }
         pendingDisconnect = disconnect
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.byeDelivery, execute: disconnect)
+    }
+
+    func choose(_ handedness: Handedness) {
+        sensing.setHandedness(handedness)
+        UserDefaults.standard.set(handedness == .left, forKey: Self.leftHandedKey)
+        if sensing.snapshot.calibration == .calibrated || !motion.isAvailable {
+            link.announceCalibration(handedness)
+        }
     }
 
     func swipeSwing() {
@@ -92,13 +105,16 @@ final class PaddleController {
     }
 
     private var forwardSample: @Sendable (MotionSample) -> Void {
-        { [sensing, link] sample in
+        { [sensing, link, haptics] sample in
             let outcome = sensing.process(sample)
             if let pose = outcome.pose {
                 link.sendRacket(pose, at: sample.time)
             }
+            if let contact = outcome.contact {
+                Task { @MainActor in haptics.playHit(strength: contact.strength, isClean: contact.isClean) }
+            }
             if outcome.didCalibrate {
-                link.announceCalibration()
+                link.announceCalibration(sensing.snapshot.handedness)
             }
         }
     }

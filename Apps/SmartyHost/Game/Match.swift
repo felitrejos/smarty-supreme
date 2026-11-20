@@ -25,6 +25,20 @@ enum CameraView: CaseIterable {
     }
 }
 
+struct StrokeTiming: Equatable {
+    static let onTime = 0.025
+
+    let side: Side
+    let timing: Double
+    let number: Int
+
+    var label: String {
+        let milliseconds = Int((abs(timing) * 1_000).rounded())
+        if abs(timing) <= Self.onTime { return "ON TIME" }
+        return timing < 0 ? "EARLY · \(milliseconds) MS" : "LATE · \(milliseconds) MS"
+    }
+}
+
 enum Opponent: String, CaseIterable {
     case computer
     case player
@@ -74,6 +88,7 @@ struct MatchSetup {
 @MainActor
 @Observable
 final class Match {
+    private static let keyboardControlsKey = "showsKeyboardControls"
     private static let keyboardStrength = 0.45
     private static let idealLead = 0.25
     private static let leadWeight = 0.25
@@ -111,8 +126,18 @@ final class Match {
     private(set) var controllerA = HostSession.Controller.local
     private(set) var controllerB = HostSession.Controller.local
     private(set) var dimmed: Set<Side> = []
-    private var controlsRequested = true
+    var showsKeyboardControls = UserDefaults.standard.object(forKey: Match.keyboardControlsKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showsKeyboardControls, forKey: Self.keyboardControlsKey) }
+    }
+    var showsTutorial = false {
+        didSet {
+            if showsTutorial, stage == .playing, !isPaused {
+                togglePause()
+            }
+        }
+    }
     var camera = CameraView.playerAEnd
+    private(set) var lastStroke: StrokeTiming?
     var isChoosingNewGame = false
 
     @ObservationIgnored let link: HostLink
@@ -168,7 +193,11 @@ final class Match {
     }
 
     var showsControls: Bool {
-        isPaused || (controlsRequested && stage == .playing)
+        isPaused || (showsKeyboardControls && stage == .playing && Side.allCases.contains { controller(of: $0) == .local })
+    }
+
+    var isSolo: Bool {
+        setup.opponent == .computer
     }
 
     func name(of side: Side) -> String {
@@ -193,8 +222,10 @@ final class Match {
             session.hold()
         }
         referee.follow(events, game: session.game)
-        if events.contains(where: { if case .served = $0 { true } else { false } }) {
-            controlsRequested = false
+        for event in events {
+            if case .stroke(let side, let timing) = event {
+                lastStroke = StrokeTiming(side: side, timing: timing, number: (lastStroke?.number ?? 0) + 1)
+            }
         }
         publish()
         if wasWaiting, stage == .playing, setup.opponent == .player {
@@ -276,7 +307,6 @@ final class Match {
         session = Self.session(for: setup, link: link, clock: clock)
         pendingSwings.removeAll()
         releaseAllKeys()
-        controlsRequested = true
         camera = .playerAEnd
         publish()
         startCommentary()
@@ -301,21 +331,12 @@ final class Match {
         session.startNow()
     }
 
-    func swapSides() {
-        session.swapSides()
-        publish()
-    }
-
     func letWaitingPhonePlay(_ side: Side, peer: PeerID) {
         session.fillVacancy(side, with: peer)
     }
 
     func readiness(of side: Side) -> Readiness {
         session.readiness(of: side)
-    }
-
-    func showControls() {
-        controlsRequested = true
     }
 
     func releaseAllKeys() {

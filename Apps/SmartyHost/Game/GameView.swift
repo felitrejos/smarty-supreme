@@ -13,6 +13,88 @@ final class Stage {
     @ObservationIgnored let feed = PoseFeed()
     @ObservationIgnored private var forecastFlight: UInt64?
     @ObservationIgnored private var forecastSteps: [Side: (step: UInt64, position: SIMD3<Double>)] = [:]
+    @ObservationIgnored private var waiting: [TablePose] = []
+    @ObservationIgnored private var anchor: TablePose?
+    @ObservationIgnored private var shownStep = 0.0
+    @ObservationIgnored private var liveStep: UInt64 = 0
+    @ObservationIgnored private var replayNumber = 0
+    @ObservationIgnored private var rewound = false
+
+    private static let hitStopRate = 0.25
+    private static let catchUpRate = 1.6
+    private static let longestLag = 60.0
+
+    // Hit-stop: while a phone swing is being confirmed the ball is drawn slowing at the bat, then it plays the return a
+    // little fast until it has caught up, so a hit decided just after contact never snaps the ball back. The bat stays live.
+    func shown(_ pose: TablePose, replay: GameState.Replay?, confirming: Bool) -> TablePose {
+        if pose.step < liveStep {
+            waiting.removeAll()
+            anchor = nil
+            shownStep = Double(pose.step)
+        }
+        let advanced = Double(pose.step - min(pose.step, liveStep))
+        liveStep = pose.step
+        if let last = waiting.last, last.step == pose.step {
+            waiting[waiting.count - 1] = merged([last, pose])
+        } else {
+            waiting.append(pose)
+        }
+        if let replay, replay.number != replayNumber {
+            replayNumber = replay.number
+            for index in waiting.indices {
+                if let position = replay.position(at: waiting[index].step) {
+                    waiting[index].ball = position
+                }
+            }
+            if let step = anchor?.step, let position = replay.position(at: step) {
+                anchor?.ball = position
+                rewound = true
+            }
+        }
+        let live = Double(pose.step)
+        let rate = confirming ? Self.hitStopRate : (shownStep < live ? Self.catchUpRate : 1)
+        shownStep = min(max(shownStep + advanced * rate, live - Self.longestLag), live)
+        let due = waiting.prefix { Double($0.step) <= shownStep }
+        waiting.removeFirst(due.count)
+        var shown: TablePose
+        if due.isEmpty {
+            shown = anchor.map(quiet) ?? pose
+        } else {
+            shown = merged(Array(due))
+            anchor = shown
+        }
+        if let next = waiting.first, let from = anchor, next.step > from.step {
+            let share = (shownStep - Double(from.step)) / Double(next.step - from.step)
+            shown.ball = from.ball + (next.ball - from.ball) * min(max(share, 0), 1)
+        }
+        shown.rackets = pose.rackets
+        shown.racketAges = pose.racketAges
+        shown.stances = pose.stances
+        shown.dimmed = pose.dimmed
+        shown.rewound = rewound
+        rewound = false
+        return shown
+    }
+
+    private func merged(_ poses: [TablePose]) -> TablePose {
+        var pose = poses[poses.count - 1]
+        pose.contacts = poses.flatMap(\.contacts)
+        pose.bounced = poses.contains(where: \.bounced)
+        pose.netHitSpeed = poses.compactMap(\.netHitSpeed).max()
+        pose.outcome = poses.compactMap(\.outcome).first
+        pose.strokes = poses.reduce(into: [:]) { strokes, pose in strokes.merge(pose.strokes) { $1 } }
+        return pose
+    }
+
+    private func quiet(_ pose: TablePose) -> TablePose {
+        var pose = pose
+        pose.contacts = []
+        pose.bounced = false
+        pose.netHitSpeed = nil
+        pose.outcome = nil
+        pose.strokes = [:]
+        return pose
+    }
 
     func forecasts(for game: GameState) -> [Side: TablePose.Forecast] {
         if forecastFlight != game.flightNumber {
@@ -25,8 +107,16 @@ final class Stage {
             }
         }
         var forecasts: [Side: TablePose.Forecast] = [:]
-        for (side, contact) in forecastSteps where contact.step >= game.step {
-            forecasts[side] = TablePose.Forecast(secondsAway: Double(contact.step - game.step) / Double(game.config.stepsPerSecond), position: contact.position)
+        let stepsPerSecond = Double(game.config.stepsPerSecond)
+        if case .rally = game.phase {
+            for (side, contact) in forecastSteps where contact.step >= game.step {
+                forecasts[side] = TablePose.Forecast(secondsAway: Double(contact.step - game.step) / stepsPerSecond, position: contact.position)
+            }
+        }
+        for side in Side.allCases {
+            if let strike = game.predictedServeStrike(for: side) {
+                forecasts[side] = TablePose.Forecast(secondsAway: Double(strike.stepsAway) / stepsPerSecond, position: strike.position)
+            }
         }
         return forecasts
     }
@@ -99,18 +189,28 @@ struct GameView: View {
                 .padding(.top, 16)
         }
         .overlay {
-            if case .gameOver(let winner) = match.phase {
+            if match.showsTutorial, match.hasStarted {
+                HowToPlayCard { match.showsTutorial = false }
+            } else if case .gameOver(let winner) = match.phase {
                 WinnerCard(winner: match.name(of: winner), score: match.score, playAgain: match.playAgain)
             } else if case .interrupted(let interruption) = match.stage {
                 InterruptionCard(match: match, interruption: interruption)
             } else if !match.hasStarted {
-                LobbyCard(match: match)
+                HStack(alignment: .top, spacing: 20) {
+                    HowToPlayCard()
+                    LobbyCard(match: match)
+                }
+
             } else if let failure = stage.failure {
                 Text(failure)
                     .font(Programme.body(13))
                     .padding(20)
                     .programmeCard()
             }
+        }
+        .overlay(alignment: .bottom) {
+            StrokeCard(stroke: match.lastStroke)
+                .padding(.bottom, 92)
         }
         .overlay(alignment: .bottom) {
             if match.showsControls, !match.isPaused {
@@ -178,7 +278,9 @@ struct GameView: View {
                 stage.scene = scene
                 stage.updates = content.subscribe(to: SceneEvents.Update.self) { event in
                     let events = match.advance()
-                    let pose = TablePose(game: match.game, events: events, dimmed: match.dimmed, forecasts: stage.forecasts(for: match.game))
+                    let stances = Dictionary(uniqueKeysWithValues: Side.allCases.compactMap { side in match.session.settledStance(of: side).map { (side, $0) } })
+                    let live = TablePose(game: match.game, events: events, dimmed: match.dimmed, forecasts: stage.forecasts(for: match.game), stances: stances)
+                    let pose = stage.shown(live, replay: match.game.lastReplay, confirming: match.game.isAwaitingPhoneHit)
                     scene.update(to: pose, elapsed: event.deltaTime)
                     stage.feed.push(pose, elapsed: event.deltaTime)
                     stats.record(event.deltaTime)
@@ -193,7 +295,7 @@ struct GameView: View {
     private static let screenUnlocked = Notification.Name("com.apple.screenIsUnlocked")
 
     private var showsCard: Bool {
-        match.isPaused || match.isGameOver || !match.hasStarted
+        match.isPaused || match.isGameOver || !match.hasStarted || match.showsTutorial
     }
 
     private var server: Side? {
@@ -252,6 +354,38 @@ private struct PlayerBArena: View {
         .onAppear { feed.isListening = true }
         .onDisappear { feed.isListening = false }
         .accessibilityLabel("Player B’s end of the table")
+    }
+}
+
+private struct StrokeCard: View {
+    private static let shownFor: Duration = .milliseconds(1_100)
+
+    let stroke: StrokeTiming?
+
+    @State private var shown: StrokeTiming?
+
+    var body: some View {
+        ZStack {
+            if let shown {
+                Text(shown.label)
+                    .font(Programme.title(13))
+                    .tracking(2)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .programmeCard()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: shown)
+        .task(id: stroke) {
+            guard let stroke else { return }
+            shown = stroke
+            try? await Task.sleep(for: Self.shownFor)
+            if shown == stroke {
+                shown = nil
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

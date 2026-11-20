@@ -21,8 +21,6 @@ struct GameCommands: Commands {
             Button(match.isPaused ? "Resume" : "Pause", action: match.togglePause)
                 .keyboardShortcut(.escape, modifiers: [])
                 .disabled(controller.isViewer || !match.hasStarted || match.isGameOver || match.isHeld || match.isWaitingForADevice)
-            Button("Swap Sides", action: match.swapSides)
-                .disabled(controller.isViewer || match.hasStarted)
             Divider()
             Toggle("Commentary", isOn: Bindable(match.referee).commentates)
                 .disabled(controller.isViewer)
@@ -39,7 +37,8 @@ struct GameCommands: Commands {
             Divider()
         }
         CommandGroup(replacing: .help) {
-            Button("Controls", action: match.showControls)
+            Button("How to Play") { match.showsTutorial = true }
+            Toggle("Keyboard Controls", isOn: Bindable(match).showsKeyboardControls)
         }
     }
 }

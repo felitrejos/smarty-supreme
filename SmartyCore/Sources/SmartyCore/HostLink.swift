@@ -17,7 +17,9 @@ public final class HostLink: Sendable {
     public struct ReceivedRacket: Equatable, Sendable {
         public let macTime: Microseconds?
         public let orientation: simd_quatd
-        public let velocity: SIMD3<Double>
+        public let angularVelocity: SIMD3<Double>
+        public let linearVelocity: SIMD3<Double>
+        public let reach: SIMD3<Double>
     }
 
     public struct PaddleInput: Equatable, Sendable {
@@ -27,8 +29,10 @@ public final class HostLink: Sendable {
         public let swings: [ReceivedSwing]
         public let rackets: [ReceivedRacket]
         public let isCalibrated: Bool
+        public let handedness: Handedness
         public let isReady: Bool
         public let pauseRequests: [Bool]
+        public let tossRequested: Bool
         public let roundTrip: Microseconds?
     }
 
@@ -59,7 +63,7 @@ public final class HostLink: Sendable {
     private struct Paddle: Sendable {
         let name: String
         var side: Side
-        var isCalibrated = false
+        var handedness: Handedness?
         var position: Double?
         var lastPointerSequence: UInt32?
         var lastPointerAt: Microseconds?
@@ -75,6 +79,7 @@ public final class HostLink: Sendable {
         var lastRacketAt: Microseconds?
         var isReady = false
         var untakenPauseRequests: [Bool] = []
+        var untakenToss = false
 
         init(name: String, side: Side) {
             self.name = name
@@ -137,7 +142,7 @@ public final class HostLink: Sendable {
                         peer: peer,
                         name: paddle.name,
                         side: paddle.side,
-                        isCalibrated: paddle.isCalibrated,
+                        isCalibrated: paddle.handedness != nil,
                         position: paddle.position,
                         pointerRate: paddle.pointerArrivals.filter { $0 + Self.pointerRateWindow > now }.count,
                         roundTrips: paddle.roundTrips,
@@ -172,17 +177,28 @@ public final class HostLink: Sendable {
                     lastRacketAt: paddle.lastRacketAt,
                     swings: paddle.untakenSwings,
                     rackets: paddle.untakenRackets,
-                    isCalibrated: paddle.isCalibrated,
+                    isCalibrated: paddle.handedness != nil,
+                    handedness: paddle.handedness ?? .right,
                     isReady: paddle.isReady,
                     pauseRequests: paddle.untakenPauseRequests,
+                    tossRequested: paddle.untakenToss,
                     roundTrip: paddle.recentRoundTrip
                 )
                 state.paddles[peer]?.untakenSwings.removeAll()
                 state.paddles[peer]?.untakenRackets.removeAll()
                 state.paddles[peer]?.untakenPauseRequests.removeAll()
+                state.paddles[peer]?.untakenToss = false
             }
             return Input(paddles: paddles, vacant: Set(state.vacancies.keys), viewerName: state.viewer?.name)
         }
+    }
+
+    public func sendIncoming(contactAt macTime: Microseconds, to side: Side) {
+        let peerTime = state.withLock { state in
+            state.paddles.values.first { $0.side == side }?.clockSync.peerAheadOfMac.map { Int64(macTime) + $0 }
+        }
+        guard let peerTime, peerTime >= 0 else { return }
+        send(.incoming(contactAt: Microseconds(peerTime)), to: side)
     }
 
     public func send(_ message: Message, to side: Side) {
@@ -233,14 +249,6 @@ public final class HostLink: Sendable {
             let phone = state.waiting.remove(at: index)
             state.vacancies[side] = nil
             admit(phone.peer, named: phone.name, as: side, in: &state)
-        }
-    }
-
-    public func swapSides() {
-        state.withLock { state in
-            for (peer, paddle) in state.paddles {
-                state.paddles[peer]?.side = paddle.side.opponent
-            }
         }
     }
 
@@ -338,7 +346,9 @@ public final class HostLink: Sendable {
             paddle.untakenRackets.append(ReceivedRacket(
                 macTime: paddle.clockSync.macTime(forPeerTime: racket.sampledAt),
                 orientation: simd_quatd(ix: Double(q.x), iy: Double(q.y), iz: Double(q.z), r: Double(q.w)),
-                velocity: SIMD3<Double>(racket.velocity)
+                angularVelocity: SIMD3<Double>(racket.angularVelocity),
+                linearVelocity: SIMD3<Double>(racket.linearVelocity),
+                reach: SIMD3<Double>(racket.reach)
             ))
             if paddle.untakenRackets.count > Self.racketBacklog {
                 paddle.untakenRackets.removeFirst()
@@ -351,12 +361,14 @@ public final class HostLink: Sendable {
             paddle.swingCount += 1
             paddle.lastSwing = received
             paddle.untakenSwings.append(received)
-        case .calibrated:
-            paddle.isCalibrated = true
+        case .calibrated(let handedness):
+            paddle.handedness = handedness
         case .ready(let isReady):
             paddle.isReady = isReady
         case .pause(let pause):
             paddle.untakenPauseRequests.append(pause)
+        case .toss:
+            paddle.untakenToss = true
         default:
             return
         }
@@ -368,7 +380,24 @@ public final class HostLink: Sendable {
             state.outbox.send(.helloAck(name: name), to: peer, at: clock.now, over: transport)
             return
         }
-        if let side = state.vacancies.first(where: { $0.value.peer == peer })?.key, let vacancy = state.vacancies.removeValue(forKey: side) {
+        // A relaunched phone says hello before its old connection is noticed gone; it takes that connection's place.
+        if let old = state.paddles.first(where: { $0.value.name == phoneName })?.key, var paddle = state.paddles.removeValue(forKey: old) {
+            paddle.clockSync = ClockSync()
+            paddle.roundTrips = []
+            paddle.unansweredPingAt = nil
+            state.paddles[peer] = paddle
+            state.waiting.removeAll { $0.peer == peer }
+            state.outbox.send(.helloAck(name: name), to: peer, at: clock.now, over: transport)
+            return
+        }
+        // A relaunched phone comes back under a new peer ID, so its held side is found by name. In a one-phone
+        // game the held side can only be this player's; with two phones a stranger waits for the Mac to confirm.
+        let held = state.vacancies.first { $0.value.peer == peer || $0.value.paddle.name == phoneName } ?? state.vacancies.first
+        let isTheOnlyPhone = state.playableSides.count == 1 && state.freeSide == nil
+        if isTheOnlyPhone || held?.value.peer == peer || held?.value.paddle.name == phoneName,
+           let side = held?.key,
+           let vacancy = state.vacancies.removeValue(forKey: side) {
+            state.waiting.removeAll { $0.peer == peer }
             state.paddles[peer] = vacancy.paddle
             state.outbox.send(.helloAck(name: name), to: peer, at: clock.now, over: transport)
             return
@@ -402,6 +431,7 @@ public final class HostLink: Sendable {
         if state.isHoldingSlots {
             paddle.untakenSwings.removeAll()
             paddle.untakenPauseRequests.removeAll()
+            paddle.untakenToss = false
             paddle.position = nil
             paddle.lastPointerAt = nil
             state.vacancies[paddle.side] = Vacancy(peer: peer, paddle: paddle)

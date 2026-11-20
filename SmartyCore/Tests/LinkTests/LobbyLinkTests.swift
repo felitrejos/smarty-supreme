@@ -63,6 +63,51 @@ struct LobbyLinkTests {
         #expect(try #require(back.paddles[.playerA]?.swings.first).macPeakTime != nil)
     }
 
+    @Test func aRelaunchedPhoneWithANewPeerIDGetsItsHeldSideBack() {
+        let harness = LinkHarness()
+        _ = harness.addPhone("Phone A")
+        harness.run(for: 1_500_000)
+        harness.host.holdSlots(true)
+
+        harness.network.disconnect(PeerID("Phone A"), LinkHarness.hostID)
+        harness.run(for: 50_000)
+        let relaunched = harness.addPhone("Phone A", as: "Phone A relaunched")
+        harness.run(for: 1_500_000)
+
+        #expect(relaunched.status == .paired(hostName: "Mac"))
+        #expect(harness.host.takeInput().vacant.isEmpty)
+        #expect(harness.host.paddles.first { $0.side == .playerA }?.name == "Phone A")
+    }
+
+    @Test func aRelaunchedPhoneTakesOverBeforeItsOldConnectionIsNoticedGone() {
+        let harness = LinkHarness()
+        _ = harness.addPhone("Phone A")
+        harness.run(for: 1_500_000)
+
+        let relaunched = harness.addPhone("Phone A", as: "Phone A relaunched")
+        harness.run(for: 1_500_000)
+
+        #expect(relaunched.status == .paired(hostName: "Mac"))
+        #expect(harness.host.paddles.map(\.side) == [.playerA])
+        #expect(harness.host.waitingNames.isEmpty)
+    }
+
+    @Test func aPhoneUnderAnotherNameStillGetsTheOnlyHeldSide() {
+        let harness = LinkHarness()
+        _ = harness.addPhone("Phone A")
+        harness.run(for: 1_500_000)
+        harness.host.holdSlots(true)
+        harness.host.setPlayableSides([.playerA])
+
+        harness.network.disconnect(PeerID("Phone A"), LinkHarness.hostID)
+        harness.run(for: 50_000)
+        let renamed = harness.addPhone("iPhone")
+        harness.run(for: 1_500_000)
+
+        #expect(renamed.status == .paired(hostName: "Mac"))
+        #expect(harness.host.takeInput().vacant.isEmpty)
+    }
+
     @Test func releasingTheHoldGivesVacantSidesToWaitingPhones() {
         let harness = LinkHarness()
         _ = harness.addPhone("Phone A")
@@ -80,28 +125,6 @@ struct LobbyLinkTests {
 
         #expect(third.status == .paired(hostName: "Mac"))
         #expect(harness.host.takeInput().vacant.isEmpty)
-    }
-
-    @Test func swappingSidesSwapsBothPhones() {
-        let harness = LinkHarness()
-        _ = harness.addPhone("Phone A")
-        harness.run(for: 50_000)
-        _ = harness.addPhone("Phone B")
-        harness.run(for: 50_000)
-
-        harness.host.swapSides()
-
-        #expect(harness.host.paddles.map(\.name) == ["Phone B", "Phone A"])
-    }
-
-    @Test func swappingWithOnePhoneMovesItToTheOtherSide() {
-        let harness = LinkHarness()
-        _ = harness.addPhone("Phone A")
-        harness.run(for: 50_000)
-
-        harness.host.swapSides()
-
-        #expect(harness.host.paddles.map(\.side) == [.playerB])
     }
 
     @Test func recentRoundTripIsTheMedianOfTheLastFivePings() throws {

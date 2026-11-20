@@ -13,7 +13,7 @@ public final class PaddleLink: Sendable {
         var host: PeerID?
         var status = Status.searching
         var pairedAt: Microseconds?
-        var isCalibrated = false
+        var handedness: Handedness?
         var gameState: GameStateUpdate?
         var outbox = Outbox()
     }
@@ -22,13 +22,21 @@ public final class PaddleLink: Sendable {
     private let transport: any Transport
     private let clock: any MonotonicClock
     private let onHaptic: @Sendable (HapticKind) -> Void
+    private let onIncoming: @Sendable (Microseconds) -> Void
     private let state = Mutex(State())
 
-    public init(name: String, transport: any Transport, clock: any MonotonicClock, onHaptic: @escaping @Sendable (HapticKind) -> Void) {
+    public init(
+        name: String,
+        transport: any Transport,
+        clock: any MonotonicClock,
+        onHaptic: @escaping @Sendable (HapticKind) -> Void,
+        onIncoming: @escaping @Sendable (Microseconds) -> Void = { _ in }
+    ) {
         self.name = name
         self.transport = transport
         self.clock = clock
         self.onHaptic = onHaptic
+        self.onIncoming = onIncoming
     }
 
     public var status: Status {
@@ -79,7 +87,9 @@ public final class PaddleLink: Sendable {
         sendWhilePaired(.racket(RacketMessage(
             sampledAt: time,
             orientation: SIMD4<Float>(Float(q.imag.x), Float(q.imag.y), Float(q.imag.z), Float(q.real)),
-            velocity: SIMD3<Float>(pose.velocity)
+            angularVelocity: SIMD3<Float>(pose.angularVelocity),
+            linearVelocity: SIMD3<Float>(pose.linearVelocity),
+            reach: SIMD3<Float>(pose.reach)
         )))
     }
 
@@ -95,15 +105,19 @@ public final class PaddleLink: Sendable {
         sendWhilePaired(.ready(isReady))
     }
 
+    public func requestToss() {
+        sendWhilePaired(.toss)
+    }
+
     public func requestPause(_ pause: Bool) {
         sendWhilePaired(.pause(pause))
     }
 
-    public func announceCalibration() {
+    public func announceCalibration(_ handedness: Handedness) {
         state.withLock { state in
-            state.isCalibrated = true
+            state.handedness = handedness
             guard case .paired = state.status else { return }
-            send(.calibrated, in: &state)
+            send(.calibrated(handedness), in: &state)
         }
     }
 
@@ -128,8 +142,8 @@ public final class PaddleLink: Sendable {
         case .helloAck(let hostName):
             state.status = .paired(hostName: hostName)
             state.pairedAt = state.pairedAt ?? receivedAt
-            if state.isCalibrated {
-                send(.calibrated, in: &state)
+            if let handedness = state.handedness {
+                send(.calibrated(handedness), in: &state)
             }
         case .bye(let reason):
             state.status = .refused(reason)
@@ -137,6 +151,8 @@ public final class PaddleLink: Sendable {
             send(.pong(pingSentAt: packet.sentAt, receivedAt: receivedAt), in: &state)
         case .haptic(let kind):
             return kind
+        case .incoming(let contactAt):
+            onIncoming(contactAt)
         case .gameState(let update):
             state.gameState = update
         default:

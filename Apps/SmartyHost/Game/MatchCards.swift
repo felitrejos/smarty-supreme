@@ -24,8 +24,6 @@ struct LobbyCard: View {
                     screenSlot
                 }
                 HStack {
-                    Button("Swap Sides", action: match.swapSides)
-                        .disabled(paddles.isEmpty)
                     Spacer()
                     Button("Start Now", action: match.startNow)
                         .keyboardShortcut(.defaultAction)

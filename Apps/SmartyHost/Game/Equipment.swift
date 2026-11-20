@@ -306,6 +306,7 @@ enum Equipment {
 
     private static func net(_ materials: Materials, tableWidth: Float) -> Entity {
         let net = Entity()
+        net.name = "net"
         let netWidth = tableWidth + 2 * Size.netOverhang
         let mesh = ModelEntity(mesh: .generatePlane(width: netWidth, height: Size.netHeight), materials: [materials.net])
         mesh.position.y = Size.tableHeight + Size.netHeight / 2

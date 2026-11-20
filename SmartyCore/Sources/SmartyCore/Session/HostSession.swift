@@ -1,4 +1,12 @@
+import simd
+import OSLog
+
 public final class HostSession {
+    private static let reactionDelay = 0.08
+    private static let stanceLock = 0.2
+    private static let stanceSettle = 0.15
+    private static let swingLog = Logger(subsystem: "com.smartysupreme.host", category: "Swing")
+
     public enum Controller: Equatable, Sendable {
         case phone
         case computer
@@ -21,7 +29,13 @@ public final class HostSession {
     private var pendingCommand: GameCommand?
     private var pendingSwings: [Swing] = []
     private var pendingRackets: [RacketSample] = []
-    private var autoMove: [Side: (flight: UInt64, target: Double)] = [:]
+    private var pendingTosses: Set<Side> = []
+    private var walks: [Side: Walk] = [:]
+    private var stances: [Side: Stance] = [:]
+    private var phoneStances: [Side: Stance] = [:]
+    private var changingStance: [Side: (stance: Stance, since: UInt64)] = [:]
+    private var announcedFlight: [Side: UInt64] = [:]
+    private var loggedSwing = 0
     private var matchPhones: Set<Side> = []
     private var reconnectDeadlines: [Side: Microseconds] = [:]
     private var heldInterruption: Interruption?
@@ -85,17 +99,6 @@ public final class HostSession {
         }
     }
 
-    public func swapSides() {
-        switch stage {
-        case .lobby, .countdown:
-            link.swapSides()
-            link.resetReadiness()
-            stage = .lobby
-        case .playing, .interrupted, .over:
-            return
-        }
-    }
-
     public func fillVacancy(_ side: Side, with peer: PeerID) {
         link.fillVacancy(side, with: peer)
     }
@@ -153,6 +156,7 @@ public final class HostSession {
         if gap <= config.longestFrame {
             queuePhoneSwings()
             queuePhoneRackets()
+            pendingTosses.formUnion(mode.phoneSides.filter { input.paddles[$0]?.tossRequested == true })
         }
         pendingSwings += local.swings.filter { controller(of: $0.side) == .local }
         unsimulatedSeconds += Double(min(gap, config.longestFrame)) / 1_000_000
@@ -172,6 +176,8 @@ public final class HostSession {
             link.holdSlots(false)
         }
         askAboutServeTimeouts()
+        announceIncomingBalls(at: now)
+        logSwing()
         publish(haptics: haptics)
         return events
     }
@@ -324,27 +330,108 @@ public final class HostSession {
     private func phoneTarget(for side: Side) -> Double? {
         guard mode.phoneSides.contains(side), let paddle = input.paddles[side] else { return nil }
         if paddle.lastRacketAt != nil {
-            return autoMoveTarget(for: side)
+            switch game.phase {
+            case .serving, .pointScored: return 0.5
+            default: return autoMoveTarget(for: side)
+            }
         }
         guard let position = paddle.position else { return nil }
         return side == .playerA ? position : 1 - position
     }
 
+    private struct Walk {
+        let flight: UInt64
+        let startedAt: UInt64
+        let contactX: Double?
+        let contactStep: UInt64?
+        var target: Double
+    }
+
     private func autoMoveTarget(for side: Side) -> Double {
-        let flight = game.flightNumber
-        if autoMove[side]?.flight != flight {
-            let x = game.predictedContact(for: side)?.position.x ?? game.config.tableWidth / 2
-            autoMove[side] = (flight, game.config.position(ofPaddleX: x))
+        let config = game.config
+        if walks[side]?.flight != game.flightNumber {
+            let held = walks[side]?.target ?? config.position(ofPaddleX: config.tableWidth / 2)
+            let contact = game.predictedContact(for: side)
+            walks[side] = Walk(flight: game.flightNumber, startedAt: game.step, contactX: contact?.position.x, contactStep: contact.map { game.step + $0.stepsAway }, target: held)
         }
-        return autoMove[side]?.target ?? 0.5
+        guard var walk = walks[side], game.step >= walk.startedAt + config.steps(Self.reactionDelay), let contactX = walk.contactX else {
+            return walks[side]?.target ?? 0.5
+        }
+        let handedness = input.paddles[side]?.handedness ?? .right
+        if let contactStep = walk.contactStep, game.step + config.steps(Self.stanceLock) < contactStep {
+            settleStance(phoneStances[side] ?? ArmModel.stance(forBallAt: (contactX - game.paddleX(of: side)) * side.forward, handedness: handedness), for: side)
+        }
+        let hand = ArmModel.restingHand(stances[side] ?? .forehand, handedness).x * side.forward
+        walk.target = config.position(ofPaddleX: contactX - hand)
+        walks[side] = walk
+        return walk.target
+    }
+
+    public func settledStance(of side: Side) -> Stance? {
+        stances[side]
+    }
+
+    // A grip has to hold for a moment before the body walks to the other side, so a wobble mid-swing doesn't send it across.
+    private func settleStance(_ wanted: Stance, for side: Side) {
+        guard let current = stances[side], current != wanted else {
+            stances[side] = wanted
+            changingStance[side] = nil
+            return
+        }
+        if let changing = changingStance[side], changing.stance == wanted {
+            if game.step >= changing.since + game.config.steps(Self.stanceSettle) {
+                stances[side] = wanted
+                changingStance[side] = nil
+            }
+        } else {
+            changingStance[side] = (wanted, game.step)
+        }
     }
 
     private func queuePhoneRackets() {
         for side in Side.allCases where controller(of: side) == .phone {
             for racket in input.paddles[side]?.rackets ?? [] {
                 let step = racket.macTime.map(timeline.step(at:)) ?? game.step
-                pendingRackets.append(RacketSample(side: side, step: step, orientation: racket.orientation, velocity: racket.velocity))
+                let stance = ArmModel.stance(of: racket.orientation, previous: phoneStances[side])
+                phoneStances[side] = stance
+                pendingRackets.append(RacketSample(
+                    side: side,
+                    step: step,
+                    orientation: racket.orientation,
+                    angularVelocity: racket.angularVelocity,
+                    linearVelocity: racket.linearVelocity,
+                    stance: stance,
+                    handedness: input.paddles[side]?.handedness ?? .right
+                ))
             }
+        }
+    }
+
+    private func describeReturn(_ swing: GameState.SwingReport) -> String {
+        guard let landing = swing.landing else { return "none" }
+        let config = game.config
+        let half = config.tableLength / 2
+        let depth = (landing.y - half) * swing.side.forward
+        if !swing.clearsNet { return "net" }
+        if landing.x < 0 || landing.x > config.tableWidth { return "wide" }
+        if depth > half { return "long" }
+        if depth < 0 { return "short" }
+        return "in"
+    }
+
+    private func logSwing() {
+        guard let swing = game.lastSwing, swing.number != loggedSwing else { return }
+        loggedSwing = swing.number
+        Self.swingLog.info("\(swing.side.playerName, privacy: .public) \(swing.outcome.rawValue, privacy: .public) peak \(swing.peakSpeed, format: .fixed(precision: 2), privacy: .public) m/s timing \(Int(swing.timing * 1_000), privacy: .public) ms height \(Int(swing.ballHeight * 100), privacy: .public) cm | best forward \(swing.nearestPeakSpeed, format: .fixed(precision: 2), privacy: .public) m/s at \(Int(swing.nearestPeakOffset * 1_000), privacy: .public) ms | fastest \(swing.fastestBlade, format: .fixed(precision: 2), privacy: .public) m/s (forward \(swing.fastestBladeForward, format: .fixed(precision: 2), privacy: .public)) | body x \(Int(swing.paddleX * 100), privacy: .public) ball x \(Int(swing.ballX * 100), privacy: .public) cm stance \(String(describing: self.stances[swing.side] ?? .forehand), privacy: .public) | return \(self.describeReturn(swing), privacy: .public)")
+    }
+
+    private func announceIncomingBalls(at now: Microseconds) {
+        for side in Side.allCases where controller(of: side) == .phone && input.paddles[side]?.lastRacketAt != nil {
+            guard announcedFlight[side] != game.flightNumber, let contact = game.predictedContact(for: side) else { continue }
+            announcedFlight[side] = game.flightNumber
+            let habit = game.timingBias(of: side, stance: stances[side] ?? .forehand)
+            let seconds = Double(contact.stepsAway) / Double(game.config.stepsPerSecond) + game.config.perceivedLag + habit
+            link.sendIncoming(contactAt: now + Microseconds(seconds * 1_000_000), to: side)
         }
     }
 
@@ -364,12 +451,14 @@ public final class HostSession {
             pendingCommand = nil
             pendingSwings.removeAll()
             pendingRackets.removeAll()
+            pendingTosses.removeAll()
         }
         return StepInput(
             targetA: target(for: .playerA, local: local),
             targetB: computer == nil ? target(for: .playerB, local: local) : move?.target,
             swings: pendingSwings + (move?.swing.map { [$0] } ?? []),
             rackets: pendingRackets,
+            tosses: pendingTosses,
             command: command
         )
     }
@@ -384,13 +473,13 @@ public final class HostSession {
         for event in events {
             switch event {
             case .served(let side):
-                if swings.contains(where: { $0.side == side }) {
+                if swings.contains(where: { $0.side == side }) || events.contains(where: { if case .stroke(side, _) = $0 { true } else { false } }) {
                     autoServes[side] = 0
                     haptics.append((side, .hit))
                 } else {
                     autoServes[side, default: 0] += 1
                 }
-            case .hit(let side, _, _):
+            case .hit(let side, _, _) where !events.contains(where: { if case .stroke(side, _) = $0 { true } else { false } }):
                 haptics.append((side, .hit))
             case .whiff(let side):
                 haptics.append((side, .miss))

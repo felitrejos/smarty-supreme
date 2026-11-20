@@ -30,6 +30,7 @@ private struct ProgrammeCard: ViewModifier {
             .background(Programme.paper, in: shape)
             .overlay(shape.inset(by: 5).strokeBorder(Programme.ink.opacity(0.75), lineWidth: 1))
             .overlay(shape.strokeBorder(Programme.ink.opacity(0.3), lineWidth: 1))
+            .compositingGroup()
             .shadow(color: .black.opacity(0.5), radius: 18, y: 10)
     }
 }

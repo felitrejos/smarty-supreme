@@ -9,7 +9,22 @@ enum Shot {
     private static let slowestServe = 1.5
     private static let fastestServe = 9.0
     private static let safeDepth = 0.2...0.92
-    private static let safeEdge = 0.06
+    private static let landingTolerance = 0.05
+    private static let slowestStroke = 3.0
+    private static let strokeSpeedStep = 1.0
+    private static let strokeRefinement = 8
+    private static let strokeDepth = 0.45...0.9
+    private static let strokeShortening = 0.25
+    private static let strokePaceLoss = 0.35
+    private static let strokePull = 0.9
+    private static let strokeWidest = 2.2
+    private static let strokeSpin = 15.0
+    private static let strokeLiftSpin = 30.0
+    private static let nailedPace = 3.0
+    private static let nailedSpin = 12.0
+    private static let flattestStroke = 3.0 * .pi / 180
+    private static let steepestStroke = -25.0 * .pi / 180
+    private static let mishitLoft = 12.0 * .pi / 180
 
     struct Plan {
         let strength: Double
@@ -29,7 +44,7 @@ enum Shot {
         return aimed(from: incoming.position, toward: SIMD2(across, depth), speed: speed, topspin: spin, config: config)
     }
 
-    static func serve(from position: SIMD3<Double>, by side: Side, plan: Plan, config: GameConfig) -> Ball {
+    static func serve(from position: SIMD3<Double>, by side: Side, plan: Plan, spin chosen: SIMD3<Double>? = nil, config: GameConfig) -> Ball {
         let half = config.tableLength / 2
         let target = SIMD2(
             config.tableWidth / 2 + lateral(plan, config: config) * config.lateralSpan * config.tableWidth / 2,
@@ -37,7 +52,7 @@ enum Shot {
         )
         let heading = direction(from: position, to: target)
         let angle = config.serveAngleDegrees * .pi / 180
-        let spin = simd_cross(SIMD3(0, 0, 1), SIMD3(heading.x, heading.y, 0)) * 2 * .pi * config.serveSpin
+        let spin = chosen ?? simd_cross(SIMD3(0, 0, 1), SIMD3(heading.x, heading.y, 0)) * 2 * .pi * config.serveSpin
         let wanted = simd_distance(SIMD2(position.x, position.y), target)
         func ball(_ speed: Double) -> Ball {
             Ball(position: position, velocity: SIMD3(heading.x * cos(angle), heading.y * cos(angle), sin(angle)) * speed, spin: spin)
@@ -55,41 +70,59 @@ enum Shot {
         return ball((low + high) / 2)
     }
 
-    static func racket(_ incoming: Ball, by side: Side, sample: RacketSample, config: GameConfig) -> Ball? {
-        let turn = side == .playerA ? simd_quatd(ix: 0, iy: 0, iz: 0, r: 1) : simd_quatd(angle: .pi, axis: SIMD3(0, 0, 1))
-        let racketVelocity = turn.act(sample.velocity)
-        let forehand = (turn * sample.orientation).act(SIMD3(0, 0, 1))
-        let relative = incoming.velocity - racketVelocity
-        let normal = simd_dot(forehand, relative) < 0 ? forehand : -forehand
-        let normalSpeed = simd_dot(relative, normal)
-        guard normalSpeed < 0 else { return nil }
-        let restitution = min(max(config.racketNormalRestitution - config.racketRestitutionPerSpeed * abs(normalSpeed), 0.5), 0.9)
-        let tangential = relative - normalSpeed * normal
-        let slip = tangential + simd_cross(incoming.spin, -config.ballRadius * normal)
-        let change = -(1 + config.racketTangentialRestitution) / 2.5 * slip
-        let spin = incoming.spin - 1.5 / config.ballRadius * simd_cross(normal, change)
-        var velocity = racketVelocity - restitution * normalSpeed * normal + tangential + change
-        velocity = assisted(velocity, spin: spin, from: incoming.position, by: side, config: config)
-        if simd_length(velocity) > config.fastestBall {
-            velocity *= config.fastestBall / simd_length(velocity)
-        }
-        return Ball(position: incoming.position, velocity: velocity, spin: spin)
+    // A phone stroke: what the phone measures well (swing speed, face angle, brush up or down, timing) sets
+    // where the ball goes, how fast and with what spin; the flight is then solved to get there.
+    struct Stroke {
+        let power: Double
+        let aim: Double
+        let lift: Double
+        let error: Double
+        let pull: Double
+        let overhead: Double
     }
 
-    private static func assisted(_ velocity: SIMD3<Double>, spin: SIMD3<Double>, from position: SIMD3<Double>, by side: Side, config: GameConfig) -> SIMD3<Double> {
-        guard config.aimAssist > 0, velocity.y * side.forward > 0 else { return velocity }
-        let flight = freeFlight(of: Ball(position: position, velocity: velocity, spin: spin), config: config)
+    static func stroke(_ incoming: Ball, by side: Side, _ stroke: Stroke, config: GameConfig) -> Ball {
         let half = config.tableLength / 2
-        let depth = (flight.landing.y - half) * side.forward / half
-        let clamped = SIMD2(
-            min(max(flight.landing.x, safeEdge), config.tableWidth - safeEdge),
-            half + side.forward * min(max(depth, safeDepth.lowerBound), safeDepth.upperBound) * half
-        )
-        guard clamped != flight.landing || !flight.clearsNet else { return velocity }
-        let speed = simd_length(velocity)
-        let topspin = simd_length(spin) * (simd_dot(spin, simd_cross(SIMD3(0, 0, 1), velocity)) >= 0 ? 1 : -1)
-        let ideal = aimed(from: position, toward: clamped, speed: speed, topspin: topspin, config: config).velocity
-        return simd_normalize(simd_mix(simd_normalize(velocity), simd_normalize(ideal), SIMD3(repeating: config.aimAssist))) * speed
+        let miss = abs(stroke.error)
+        let lateral = min(max(stroke.aim + stroke.pull * stroke.error * strokePull, -strokeWidest), strokeWidest)
+        let depth = min(max(strokeDepth.lowerBound + (strokeDepth.upperBound - strokeDepth.lowerBound) * stroke.power - strokeShortening * miss, safeDepth.lowerBound), safeDepth.upperBound)
+        let target = SIMD2(config.tableWidth / 2 + lateral * config.lateralSpan * config.tableWidth / 2, half + side.forward * depth * half)
+        // A hard swing timed right gets extra pace and topspin to dip it in: the reward for nailing it.
+        let nailed = stroke.power * (1 - miss) * (1 - miss)
+        let pace = slowestStroke + (config.fastestShot - slowestStroke) * stroke.power * (1 - strokePaceLoss * miss) + nailedPace * nailed
+        let topspin = 2 * .pi * (strokeSpin + strokeLiftSpin * stroke.lift + nailedSpin * nailed)
+        let flattest = flattestStroke + (steepestStroke - flattestStroke) * stroke.overhead + mishitLoft * miss
+        func shot(_ speed: Double) -> Ball {
+            aimed(from: incoming.position, toward: target, speed: speed, topspin: topspin, config: config)
+        }
+        func lands(_ speed: Double, rising: Bool = false) -> Bool {
+            let ball = shot(speed)
+            guard !rising || asin(ball.velocity.z / ball.speed) >= flattest else { return false }
+            let flight = freeFlight(of: ball, config: config)
+            return flight.clearsNet && simd_distance(flight.landing, target) < landingTolerance
+        }
+        func fits(_ speed: Double) -> Bool {
+            lands(speed, rising: true)
+        }
+        if fits(pace) {
+            return shot(pace)
+        }
+        // The pace the swing asked for can't make it: take the workable speed closest to it, slower or faster.
+        let speeds = Array(stride(from: slowestStroke, through: config.fastestBall, by: strokeSpeedStep))
+        let workable = speeds.filter(fits)
+        guard var inside = workable.min(by: { abs($0 - pace) < abs($1 - pace) }) else {
+            return shot(speeds.filter { lands($0) }.min { abs($0 - pace) < abs($1 - pace) } ?? pace)
+        }
+        var outside = pace
+        for _ in 0..<strokeRefinement {
+            let middle = (inside + outside) / 2
+            if fits(middle) {
+                inside = middle
+            } else {
+                outside = middle
+            }
+        }
+        return shot(inside)
     }
 
     private static func lateral(_ plan: Plan, config: GameConfig) -> Double {
@@ -134,7 +167,7 @@ enum Shot {
         simd_normalize(target - SIMD2(position.x, position.y))
     }
 
-    private static func freeFlight(of start: Ball, config: GameConfig) -> (landing: SIMD2<Double>, clearsNet: Bool) {
+    static func freeFlight(of start: Ball, config: GameConfig) -> (landing: SIMD2<Double>, clearsNet: Bool) {
         var ball = start
         var clearsNet = true
         let middle = config.tableLength / 2

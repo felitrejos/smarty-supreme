@@ -54,17 +54,31 @@ public struct RacketSample: Equatable, Sendable {
     public let side: Side
     public let step: UInt64
     public let orientation: simd_quatd
-    public let velocity: SIMD3<Double>
+    public let angularVelocity: SIMD3<Double>
+    public let linearVelocity: SIMD3<Double>
+    public let stance: Stance
+    public let handedness: Handedness
 
-    public init(side: Side, step: UInt64, orientation: simd_quatd, velocity: SIMD3<Double>) {
+    public init(
+        side: Side,
+        step: UInt64,
+        orientation: simd_quatd,
+        angularVelocity: SIMD3<Double>,
+        linearVelocity: SIMD3<Double> = .zero,
+        stance: Stance? = nil,
+        handedness: Handedness = .right
+    ) {
         self.side = side
         self.step = step
         self.orientation = orientation
-        self.velocity = velocity
+        self.angularVelocity = angularVelocity
+        self.linearVelocity = linearVelocity
+        self.stance = stance ?? ArmModel.stance(of: orientation)
+        self.handedness = handedness
     }
 
-    public var speed: Double {
-        simd_length(velocity)
+    public var bladeVelocity: SIMD3<Double> {
+        ArmModel.bladeVelocity(angularVelocity, linearVelocity: linearVelocity, orientation: orientation, stance: stance, handedness: handedness)
     }
 }
 
@@ -79,24 +93,28 @@ public struct StepInput: Sendable {
     public var targetB: Double?
     public var swings: [Swing]
     public var rackets: [RacketSample]
+    public var tosses: Set<Side>
     public var command: GameCommand?
 
-    public init(targetA: Double? = nil, targetB: Double? = nil, swings: [Swing] = [], rackets: [RacketSample] = [], command: GameCommand? = nil) {
+    public init(targetA: Double? = nil, targetB: Double? = nil, swings: [Swing] = [], rackets: [RacketSample] = [], tosses: Set<Side> = [], command: GameCommand? = nil) {
         self.targetA = targetA
         self.targetB = targetB
         self.swings = swings
         self.rackets = rackets
+        self.tosses = tosses
         self.command = command
     }
 }
 
 public enum GameEvent: Equatable, Sendable {
+    case tossed(Side)
     case served(Side)
     case hit(Side, strength: Double, rally: Int)
     case edgeHit(Side)
     case whiff(Side)
     case bounce(Side)
     case net
+    case stroke(Side, timing: Double)
     case pointScored(winner: Side, score: Score)
     case gameOver(winner: Side)
     case paused

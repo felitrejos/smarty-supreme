@@ -129,7 +129,7 @@ struct LinkTests {
         let harness = LinkHarness()
         let phone = harness.addPhone("Phone A")
         harness.run(for: 100_000)
-        phone.announceCalibration()
+        phone.announceCalibration(.right)
         harness.run(for: 100_000)
         #expect(harness.host.paddles.first?.isCalibrated == true)
     }
@@ -137,7 +137,7 @@ struct LinkTests {
     @Test func calibrationFromBeforePairingReachesTheHostOncePaired() {
         let harness = LinkHarness()
         let phone = harness.addPhone("Phone A")
-        phone.announceCalibration()
+        phone.announceCalibration(.right)
         harness.run(for: 100_000)
         #expect(harness.host.paddles.first?.isCalibrated == true)
     }
@@ -353,12 +353,12 @@ struct LinkHarness {
         relay.connect(host.handle)
     }
 
-    func addPhone(_ name: String, ahead: Microseconds = 0, onHaptic: @escaping @Sendable (HapticKind) -> Void = { _ in }) -> PaddleLink {
+    func addPhone(_ name: String, as peer: String? = nil, ahead: Microseconds = 0, onHaptic: @escaping @Sendable (HapticKind) -> Void = { _ in }) -> PaddleLink {
         let relay = EventRelay()
-        let transport = network.join(as: PeerID(name), onEvent: relay.forward)
+        let transport = network.join(as: PeerID(peer ?? name), onEvent: relay.forward)
         let phone = PaddleLink(name: name, transport: transport, clock: OffsetClock(base: clock, ahead: ahead), onHaptic: onHaptic)
         relay.connect(phone.handle)
-        network.connect(PeerID(name), Self.hostID)
+        network.connect(PeerID(peer ?? name), Self.hostID)
         return phone
     }
 

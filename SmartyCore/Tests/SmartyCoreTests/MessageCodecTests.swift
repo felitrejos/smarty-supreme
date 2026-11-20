@@ -6,7 +6,9 @@ struct MessageCodecTests {
     static let everyMessage: [Message] = [
         .hello(name: "Felipe's iPhone"),
         .helloAck(name: "MacBook Pro"),
-        .calibrated,
+        .calibrated(.right),
+        .calibrated(.left),
+        .toss,
         .pointer(position: 0.731),
         .swing(SwingMessage(peakAt: 9_876_543_210, strength: 0.42, direction: SIMD3(0.1, -0.5, 0.86))),
         .ready(true),
@@ -34,7 +36,8 @@ struct MessageCodecTests {
             rally: 70_000,
             winner: .playerA
         )),
-        .racket(RacketMessage(sampledAt: 77_000_123, orientation: SIMD4(0.1, -0.2, 0.3, 0.927), velocity: SIMD3(0.4, 5.5, 1.2))),
+        .racket(RacketMessage(sampledAt: 77_000_123, orientation: SIMD4(0.1, -0.2, 0.3, 0.927), angularVelocity: SIMD3(0.4, 9.5, -1.2), linearVelocity: SIMD3(0.1, 2.2, 0.3), reach: SIMD3(0.02, 0.15, -0.01))),
+        .incoming(contactAt: 88_000_456),
     ]
 
     @Test(arguments: everyMessage)

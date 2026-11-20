@@ -67,38 +67,6 @@ struct LobbyFlowTests {
         #expect(phoneB.gameState?.side == .playerB)
     }
 
-    @Test func sidesSwapInTheLobbyButNotOnceTheMatchHasStarted() {
-        let harness = SessionHarness(mode: .twoPlayers)
-        _ = harness.addPhone("Phone A", holding: 0.5)
-        _ = harness.addPhone("Phone B", holding: 0.5)
-        harness.run(for: 100_000)
-
-        harness.session.swapSides()
-        #expect(harness.link.host.paddles.map(\.name) == ["Phone B", "Phone A"])
-
-        harness.session.startNow()
-        harness.run(for: 100_000)
-        harness.session.swapSides()
-        #expect(harness.link.host.paddles.map(\.name) == ["Phone B", "Phone A"])
-    }
-
-    @Test func swappingSidesAsksBothPlayersToBeReadyAgain() {
-        let harness = SessionHarness(mode: .twoPlayers)
-        let phoneA = harness.addPhone("Phone A", holding: 0.5)
-        let phoneB = harness.addPhone("Phone B", holding: 0.5)
-        harness.run(for: 2_000_000)
-        phoneA.setReady(true)
-        phoneB.setReady(true)
-        harness.run(for: 100_000)
-
-        harness.session.swapSides()
-        harness.run(for: 100_000)
-
-        #expect(harness.session.stage == .lobby)
-        #expect(phoneA.gameState?.phase == .lobby)
-        #expect(phoneA.gameState?.side == .playerB)
-    }
-
     @Test func aPhoneOnASlowConnectionIsToldSo() {
         let harness = SessionHarness(mode: .twoPlayers, conditions: LinkConditions(latency: 30_000))
         let phone = harness.addPhone("Phone A", holding: 0.5)
@@ -515,7 +483,7 @@ final class SessionHarness {
         holdings[name] = position
         run(for: 50_000)
         if calibrated {
-            phone.announceCalibration()
+            phone.announceCalibration(.right)
         }
         return phone
     }

@@ -119,19 +119,23 @@ public struct TableSnapshot: Equatable, Sendable {
 public struct RacketMessage: Equatable, Sendable {
     public let sampledAt: Microseconds
     public let orientation: SIMD4<Float>
-    public let velocity: SIMD3<Float>
+    public let angularVelocity: SIMD3<Float>
+    public let linearVelocity: SIMD3<Float>
+    public let reach: SIMD3<Float>
 
-    public init(sampledAt: Microseconds, orientation: SIMD4<Float>, velocity: SIMD3<Float>) {
+    public init(sampledAt: Microseconds, orientation: SIMD4<Float>, angularVelocity: SIMD3<Float>, linearVelocity: SIMD3<Float>, reach: SIMD3<Float>) {
         self.sampledAt = sampledAt
         self.orientation = orientation
-        self.velocity = velocity
+        self.angularVelocity = angularVelocity
+        self.linearVelocity = linearVelocity
+        self.reach = reach
     }
 }
 
 public enum Message: Equatable, Sendable {
     case hello(name: String)
     case helloAck(name: String)
-    case calibrated
+    case calibrated(Handedness)
     case pointer(position: Float)
     case swing(SwingMessage)
     case ready(Bool)
@@ -144,6 +148,8 @@ public enum Message: Equatable, Sendable {
     case pause(Bool)
     case snapshot(TableSnapshot)
     case racket(RacketMessage)
+    case incoming(contactAt: Microseconds)
+    case toss
 
     public var channel: Channel {
         switch self {

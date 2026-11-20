@@ -10,6 +10,30 @@ public struct GameState: Equatable, Sendable {
         case gameOver(winner: Side)
     }
 
+    public struct SwingReport: Equatable, Sendable {
+        public enum Outcome: String, Sendable {
+            case clean
+            case edge
+            case whiff
+            case noSwing
+        }
+
+        public let number: Int
+        public let side: Side
+        public let outcome: Outcome
+        public let peakSpeed: Double
+        public let timing: Double
+        public let ballHeight: Double
+        public let nearestPeakSpeed: Double
+        public let nearestPeakOffset: Double
+        public let fastestBlade: Double
+        public let fastestBladeForward: Double
+        public let paddleX: Double
+        public let ballX: Double
+        public var landing: SIMD2<Double>?
+        public var clearsNet = false
+    }
+
     public struct Contact: Equatable, Sendable {
         public let stepsAway: UInt64
         public let position: SIMD3<Double>
@@ -21,6 +45,7 @@ public struct GameState: Equatable, Sendable {
         var swingsBlockedUntil: UInt64 = 0
         var pendingSwing: Swing?
         var samples: [RacketSample] = []
+        var timings: [Stance: [Double]] = [:]
     }
 
     private struct Chance: Equatable, Sendable {
@@ -30,6 +55,25 @@ public struct GameState: Equatable, Sendable {
         let paddleX: Double
     }
 
+    public struct Replay: Equatable, Sendable {
+        public let number: Int
+        public let from: UInt64
+        public let positions: [SIMD3<Double>]
+
+        public func position(at step: UInt64) -> SIMD3<Double>? {
+            guard step > from, step - from <= positions.count else { return nil }
+            return positions[Int(step - from) - 1]
+        }
+    }
+
+    private struct Toss: Equatable, Sendable {
+        let startedAt: UInt64
+        let queued: SIMD2<Double>?
+        let start: Ball
+        let strikeStep: UInt64
+        let strikePoint: SIMD3<Double>
+    }
+
     private struct PendingPoint: Equatable, Sendable {
         let loser: Side
         let awardAt: UInt64
@@ -37,6 +81,18 @@ public struct GameState: Equatable, Sendable {
 
     private static let sampleMemory = 0.4
     private static let predictionLimit = 3.0
+    private static let ballInHand = 0.7
+    private static let handSpeed = 1.2
+    private static let longestToss = 2.0
+    private static let servePull = 0.6
+    private static let servePaceLoss = 0.35
+    private static let aimPerFace = 2.0
+    private static let sideOn = 0.3
+    private static let learnableError = 0.95
+    private static let swingStarting = 0.5
+    private static let biasAfter = 3
+    private static let biasMemory = 8
+    private static let largestBias = 0.05
 
     public let config: GameConfig
     public private(set) var step: UInt64 = 0
@@ -44,12 +100,15 @@ public struct GameState: Equatable, Sendable {
     public private(set) var score = Score(a: 0, b: 0)
     public private(set) var rally = 0
     public private(set) var flightNumber: UInt64 = 0
+    public private(set) var lastSwing: SwingReport?
+    public private(set) var lastReplay: Replay?
     private var flight: Flight
     private var paddleA: Paddle
     private var paddleB: Paddle
     private var chance: Chance?
     private var phaseBeforePause: Phase?
     private var pendingPoint: PendingPoint?
+    private var toss: Toss?
     private var random: SplitMix64
 
     public init(seed: UInt64, config: GameConfig = GameConfig()) {
@@ -60,7 +119,7 @@ public struct GameState: Equatable, Sendable {
         paddleB = Paddle(x: middle, target: middle)
         phase = .serving(config.firstServer, since: 0)
         flight = Flight(ball: Ball(position: .zero), hitter: config.firstServer, isServe: true)
-        holdBallForServe(by: config.firstServer)
+        holdBallForServe(by: config.firstServer, snap: true)
     }
 
     public var ball: Ball {
@@ -116,11 +175,15 @@ public struct GameState: Equatable, Sendable {
         }
         switch phase {
         case .serving(let server, let since):
-            holdBallForServe(by: server)
-            if let sample = paddle(server).samples.last, sample.step + config.steps(config.lagCompensation) >= step, sample.speed >= config.serveThreshold, step >= paddle(server).swingsBlockedUntil {
-                serve(by: server, strength: min(sample.speed / config.fullSwingSpeed, 1), aim: 0, events: &events)
-            } else if step - since >= config.steps(config.autoServeAfter) {
-                serve(by: server, strength: config.autoServeStrength, aim: 0, events: &events)
+            if let toss {
+                followToss(toss, by: server, events: &events)
+            } else {
+                holdBallForServe(by: server)
+                if input.tosses.contains(server), step >= paddle(server).swingsBlockedUntil {
+                    startToss(by: server, queued: nil, events: &events)
+                } else if paddle(server).samples.isEmpty, step - since >= config.steps(config.autoServeAfter) {
+                    startToss(by: server, queued: SIMD2(config.autoServeStrength, 0), events: &events)
+                }
             }
         case .rally:
             fly(events: &events)
@@ -128,6 +191,13 @@ public struct GameState: Equatable, Sendable {
             expireSwings(events: &events)
             awardPendingPoint(events: &events)
         case .pointScored(let until):
+            for event in flight.advance(config: config) {
+                switch event {
+                case .bounce(let half): events.append(.bounce(half))
+                case .net: events.append(.net)
+                case .fault, .chance: break
+                }
+            }
             if step >= until {
                 startServing()
             }
@@ -188,8 +258,8 @@ public struct GameState: Equatable, Sendable {
         guard step >= paddle(side).swingsBlockedUntil else { return }
         switch phase {
         case .serving(let server, _):
-            guard side == server else { return }
-            serve(by: server, strength: swing.strength, aim: swing.aim, events: &events)
+            guard side == server, toss == nil else { return }
+            startToss(by: server, queued: SIMD2(swing.strength, swing.aim), events: &events)
         case .rally:
             if let chance, chance.side == side, isInWindow(swing.step, of: chance) {
                 hit(chance, with: swing, events: &events)
@@ -214,6 +284,12 @@ public struct GameState: Equatable, Sendable {
         }
     }
 
+    private enum RacketSwing {
+        case waiting
+        case none
+        case peak(RacketSample)
+    }
+
     private mutating func resolveChance(events: inout [GameEvent]) {
         guard let chance else { return }
         let side = chance.side
@@ -221,22 +297,230 @@ public struct GameState: Equatable, Sendable {
             hit(chance, with: swing, events: &events)
             return
         }
-        let waited = step - chance.step
-        let samples = paddle(side).samples
-        let hasSamplesPastContact = samples.contains { $0.step >= chance.step }
-        if hasSamplesPastContact || waited >= config.steps(config.lagCompensation) {
-            let window = config.steps(config.swingWindow)
-            let swinging = samples.filter { $0.speed >= config.swingThreshold && $0.step + window >= chance.step && $0.step <= chance.step + window }
-            if let sample = swinging.min(by: { distance($0.step, chance.step) < distance($1.step, chance.step) }),
-               isReachable(chance),
-               let returned = Shot.racket(chance.ball, by: side, sample: sample, config: config) {
-                land(returned, from: chance, strength: min(sample.speed / config.fullSwingSpeed, 1), contact: contactPoint(of: chance), events: &events)
-                return
-            }
+        switch racketSwing(for: chance) {
+        case .peak(let sample):
+            strike(chance, with: sample, events: &events)
+            return
+        case .waiting:
+            return
+        case .none:
+            break
         }
-        if waited > max(config.steps(config.swingWindow), config.steps(config.lagCompensation)) {
+        if step > chance.step + lastSwingDecision {
+            let window = swingWindow(around: chance.step)
+            let inWindow = paddle(side).samples.filter { window.contains($0.step) }
+            if !inWindow.isEmpty {
+                report(chance, .noSwing, peakSpeed: inWindow.map { forwardSpeed(of: $0) }.max() ?? 0, timing: 0)
+            }
             self.chance = nil
         }
+    }
+
+    private func racketSwing(for chance: Chance) -> RacketSwing {
+        swingPeak(of: chance.side, around: chance.step, bias: timingBias(of: chance.side, stance: stance(at: chance)), speed: swingSpeed(for: chance))
+    }
+
+    // The ball has reached a phone player's bat while they are swinging and the hit isn't decided yet: the display
+    // slows the ball here (hit-stop). No swing, no slow-down.
+    public var isAwaitingPhoneHit: Bool {
+        guard let chance else { return false }
+        let window = swingWindow(around: chance.step, bias: timingBias(of: chance.side, stance: stance(at: chance)))
+        let speed = swingSpeed(for: chance)
+        return paddle(chance.side).samples.contains { window.contains($0.step) && speed($0) >= config.swingThreshold * Self.swingStarting }
+    }
+
+    // The grip as the ball arrives decides which learned timing habit applies, for the window and the judgement alike.
+    private func stance(at chance: Chance) -> Stance {
+        let samples = paddle(chance.side).samples
+        return (samples.last { $0.step <= chance.step } ?? samples.last)?.stance ?? .forehand
+    }
+
+    private func swingPeak(of side: Side, around contact: UInt64, bias: Double = 0, speed: (RacketSample) -> Double) -> RacketSwing {
+        let samples = paddle(side).samples
+        guard let latest = samples.last else { return .none }
+        let window = swingWindow(around: contact, bias: bias)
+        let isOver = latest.step >= window.upperBound || step >= window.upperBound + config.steps(config.lagCompensation)
+        let candidates = samples.filter { window.contains($0.step) && speed($0) >= config.swingThreshold }
+        guard let peak = candidates.max(by: { speed($0) < speed($1) }) else {
+            return isOver ? .none : .waiting
+        }
+        return hasFallen(after: peak, in: samples, speed: speed) || isOver ? .peak(peak) : .waiting
+    }
+
+    // The higher the ball, the more a downward swing counts alongside a forward one.
+    private func swingSpeed(for chance: Chance) -> (RacketSample) -> Double {
+        let overhead = overhead(of: chance)
+        return { (sample: RacketSample) in
+            abs(sample.bladeVelocity.y) * (1 - overhead) + simd_length(sample.bladeVelocity) * overhead
+        }
+    }
+
+    private func overhead(of chance: Chance) -> Double {
+        let t = min(max((chance.ball.position.z - config.overheadFrom) / (config.overheadFull - config.overheadFrom), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
+
+    private mutating func startToss(by server: Side, queued: SIMD2<Double>?, events: inout [GameEvent]) {
+        flight.ball.velocity = SIMD3(0, 0, (2 * config.gravity * config.tossHeight).squareRoot())
+        var ball = flight.ball
+        var steps: UInt64 = 0
+        while !(ball.velocity.z < 0 && ball.position.z <= config.serveHeight), steps < config.steps(Self.longestToss) {
+            BallPhysics.fly(&ball, seconds: config.physicsStep, config: config)
+            steps += 1
+        }
+        toss = Toss(startedAt: step, queued: queued, start: flight.ball, strikeStep: step + steps, strikePoint: ball.position)
+        events.append(.tossed(server))
+    }
+
+    // The toss falls through the strike point like a rally ball reaching the bat: a swing there serves, a miss lets it drop back into the hand.
+    private mutating func followToss(_ toss: Toss, by server: Side, events: inout [GameEvent]) {
+        BallPhysics.fly(&flight.ball, seconds: config.physicsStep, config: config)
+        if let queued = toss.queued {
+            if step >= toss.strikeStep {
+                serve(by: server, strength: queued.x, aim: queued.y, events: &events)
+            }
+            return
+        }
+        if case .peak(let peak) = swingPeak(of: server, around: toss.strikeStep, speed: forwardSpeed(of:)) {
+            strikeServe(toss, with: peak, by: server, events: &events)
+        } else if step > toss.strikeStep + lastSwingDecision, flight.ball.velocity.z < 0, flight.ball.position.z <= config.tossFrom {
+            self.toss = nil
+        }
+    }
+
+    private mutating func strikeServe(_ toss: Toss, with peak: RacketSample, by server: Side, events: inout [GameEvent]) {
+        let timing = (Double(peak.step) - Double(toss.strikeStep + config.steps(config.perceivedLag))) / Double(config.stepsPerSecond)
+        let struck = min(toss.strikeStep, step)
+        var ball = toss.start
+        for _ in toss.startedAt..<struck {
+            BallPhysics.fly(&ball, seconds: config.physicsStep, config: config)
+        }
+        let error = timingError(timing)
+        let strength = min(forwardSpeed(of: peak) / config.fullSwingSpeed, 1) * (1 - Self.servePaceLoss * abs(error))
+        let aim = min(max(faceAim(of: peak, by: server) + pull(of: peak, by: server) * error * Self.servePull, -1), 1)
+        serve(by: server, from: ball.position, strength: strength, aim: aim, spin: serveSpin(of: peak, by: server), catchUp: step - struck, events: &events)
+        events.append(.stroke(server, timing: timing))
+    }
+
+    // Aim fades out as the face turns side-on, so it can't flip from one side to the other between samples.
+    private func faceAim(of peak: RacketSample, by server: Side) -> Double {
+        let face = peak.orientation.act(SIMD3(0, 0, 1))
+        let across = face.y < 0 ? -face.x : face.x
+        let facing = min(abs(face.y) / Self.sideOn, 1)
+        return min(max(across * Self.aimPerFace, -1), 1) * facing * server.forward
+    }
+
+    public func predictedServeStrike(for side: Side) -> Contact? {
+        guard case .serving(side, _) = phase, let toss, toss.queued == nil, toss.strikeStep >= step else { return nil }
+        return Contact(stepsAway: toss.strikeStep - step, position: toss.strikePoint)
+    }
+
+    // Brushing the ball spins it about (brush × face normal): across the body for sidespin, up or down for top or back.
+    private func serveSpin(of peak: RacketSample, by server: Side) -> SIMD3<Double> {
+        let across = (peak.stance == .forehand ? -1 : 1) * peak.handedness.mirror
+        let lift = lift(of: peak)
+        let spin = 2 * .pi * SIMD3(-(config.serveSpin + lift * config.serveLiftSpin), 0, across * config.serveSideSpin)
+        return SIMD3(spin.x * server.forward, spin.y, spin.z)
+    }
+
+    private func hasFallen(after peak: RacketSample, in samples: [RacketSample], speed: (RacketSample) -> Double) -> Bool {
+        let after = samples.filter { $0.step > peak.step }.suffix(2)
+        return after.count == 2 && after.allSatisfy { speed($0) < config.peakFalloff * speed(peak) }
+    }
+
+    private func swingWindow(around contact: UInt64, bias: Double = 0) -> ClosedRange<UInt64> {
+        let centre = UInt64(max(Int64(contact) + Int64(config.steps(config.perceivedLag)) + Int64((bias * Double(config.stepsPerSecond)).rounded()), 0))
+        return (centre - min(centre, config.steps(config.earlySwing)))...(centre + config.steps(config.lateSwing))
+    }
+
+    private mutating func strike(_ chance: Chance, with peak: RacketSample, events: inout [GameEvent]) {
+        let side = chance.side
+        let raw = (Double(peak.step) - Double(chance.step + config.steps(config.perceivedLag))) / Double(config.stepsPerSecond)
+        let stance = stance(at: chance)
+        let timing = raw - timingBias(of: side, stance: stance)
+        if abs(timingError(timing)) < Self.learnableError {
+            remember(timing: raw, of: side, stance: stance)
+        }
+        let speed = swingSpeed(for: chance)(peak)
+        let isClean = abs(timing) <= config.cleanTiming
+        report(chance, isClean ? .clean : .edge, peakSpeed: speed, timing: timing)
+        guard (config.lowestContact...config.highestContact).contains(chance.ball.position.z) else {
+            self.chance = nil
+            whiff(side, events: &events)
+            return
+        }
+        let power = min(speed / config.fullSwingSpeed, 1)
+        let returned = Shot.stroke(chance.ball, by: side, Shot.Stroke(
+            power: power,
+            aim: faceAim(of: peak, by: side),
+            lift: lift(of: peak),
+            error: timingError(timing),
+            pull: pull(of: peak, by: side),
+            overhead: overhead(of: chance)
+        ), config: config)
+        let flight = Shot.freeFlight(of: returned, config: config)
+        lastSwing?.landing = flight.landing
+        lastSwing?.clearsNet = flight.clearsNet
+        land(returned, from: chance, strength: power, contact: isClean ? 0 : 1, events: &events)
+        events.append(.stroke(side, timing: timing))
+    }
+
+    private var lastSwingDecision: UInt64 {
+        max(config.steps(config.swingWindow), config.steps(config.perceivedLag + config.lateSwing + Self.largestBias)) + config.steps(config.lagCompensation)
+    }
+
+    private func timingError(_ timing: Double) -> Double {
+        min(max(timing / (timing < 0 ? config.earlySwing : config.lateSwing), -1), 1)
+    }
+
+    // Early meets a bat already swung through, late one still coming round: each drifts the ball its own way across.
+    private func pull(of peak: RacketSample, by side: Side) -> Double {
+        (peak.stance == .forehand ? 1 : -1) * peak.handedness.mirror * side.forward
+    }
+
+    private func lift(of peak: RacketSample) -> Double {
+        min(max(peak.bladeVelocity.z / config.liftSpeed, -1), 1)
+    }
+
+    // A player's swings land consistently early or late on one side; judge timing against their own habit.
+    public func timingBias(of side: Side, stance: Stance) -> Double {
+        let recent = paddle(side).timings[stance] ?? []
+        guard recent.count >= Self.biasAfter else { return 0 }
+        return min(max(recent.sorted()[recent.count / 2], -Self.largestBias), Self.largestBias)
+    }
+
+    private mutating func remember(timing: Double, of side: Side, stance: Stance) {
+        var paddle = paddle(side)
+        paddle.timings[stance, default: []].append(timing)
+        if paddle.timings[stance, default: []].count > Self.biasMemory {
+            paddle.timings[stance]?.removeFirst()
+        }
+        setPaddle(side, paddle)
+    }
+
+    private mutating func report(_ chance: Chance, _ outcome: SwingReport.Outcome, peakSpeed: Double, timing: Double) {
+        let wide = config.steps(0.5)
+        let around = paddle(chance.side).samples.filter { $0.step + wide >= chance.step && $0.step <= chance.step + wide }
+        let forwardPeak = around.max { forwardSpeed(of: $0) < forwardSpeed(of: $1) }
+        let fastest = around.max { simd_length($0.bladeVelocity) < simd_length($1.bladeVelocity) }
+        lastSwing = SwingReport(
+            number: (lastSwing?.number ?? 0) + 1,
+            side: chance.side,
+            outcome: outcome,
+            peakSpeed: peakSpeed,
+            timing: timing,
+            ballHeight: chance.ball.position.z,
+            nearestPeakSpeed: forwardPeak.map { forwardSpeed(of: $0) } ?? 0,
+            nearestPeakOffset: forwardPeak.map { (Double($0.step) - Double(chance.step)) / Double(config.stepsPerSecond) } ?? 0,
+            fastestBlade: fastest.map { simd_length($0.bladeVelocity) } ?? 0,
+            fastestBladeForward: fastest.map { forwardSpeed(of: $0) } ?? 0,
+            paddleX: chance.paddleX,
+            ballX: chance.ball.position.x
+        )
+    }
+
+    private func forwardSpeed(of sample: RacketSample) -> Double {
+        abs(sample.bladeVelocity.y)
     }
 
     private mutating func hit(_ chance: Chance, with swing: Swing, events: inout [GameEvent]) {
@@ -267,13 +551,21 @@ public struct GameState: Equatable, Sendable {
         if abs(contact) >= config.edgeContact {
             events.append(.edgeHit(side))
         }
-        for _ in chance.step..<step {
+        replayFlight(from: chance.step)
+    }
+
+    // A hit decided after the contact step replays the return from there; the path is kept so a display drawn behind the engine can follow it.
+    private mutating func replayFlight(from start: UInt64) {
+        var positions: [SIMD3<Double>] = []
+        for _ in start..<step {
             for event in flight.advance(config: config) {
                 if case .fault(let loser) = event {
                     pendingPoint = PendingPoint(loser: loser, awardAt: step + config.steps(config.lagCompensation))
                 }
             }
+            positions.append(flight.ball.position)
         }
+        lastReplay = Replay(number: (lastReplay?.number ?? 0) + 1, from: start, positions: positions)
     }
 
     private mutating func expireSwings(events: inout [GameEvent]) {
@@ -292,15 +584,25 @@ public struct GameState: Equatable, Sendable {
         events.append(.whiff(side))
     }
 
-    private mutating func serve(by server: Side, strength: Double, aim: Double, events: inout [GameEvent]) {
+    private mutating func serve(
+        by server: Side,
+        from position: SIMD3<Double>? = nil,
+        strength: Double,
+        aim: Double,
+        spin: SIMD3<Double>? = nil,
+        catchUp: UInt64 = 0,
+        events: inout [GameEvent]
+    ) {
         let plan = Shot.Plan(strength: strength, aim: aim, contact: 0, timing: 0)
         flightNumber += 1
-        flight = Flight(ball: Shot.serve(from: flight.ball.position, by: server, plan: plan, config: config), hitter: server, isServe: true)
+        flight = Flight(ball: Shot.serve(from: position ?? flight.ball.position, by: server, plan: plan, spin: spin, config: config), hitter: server, isServe: true)
+        toss = nil
         rally = 0
         chance = nil
         phase = .rally
         block(server)
         events.append(.served(server))
+        replayFlight(from: step - catchUp)
     }
 
     private mutating func awardPendingPoint(events: inout [GameEvent]) {
@@ -322,14 +624,20 @@ public struct GameState: Equatable, Sendable {
     private mutating func startServing() {
         let server = score.server(firstServer: config.firstServer, target: config.winningScore, servesPerTurn: config.servesPerTurn)
         phase = .serving(server, since: step)
-        holdBallForServe(by: server)
+        toss = nil
+        holdBallForServe(by: server, snap: true)
     }
 
-    private mutating func holdBallForServe(by server: Side) {
+    // A phone server holds the ball on the side of the stroke they're shaping up for.
+    private mutating func holdBallForServe(by server: Side, snap: Bool = false) {
         let edge = config.ballRadius * 4
-        let x = min(max(paddle(server).x, edge), config.tableWidth - edge)
+        let hand = paddle(server).samples.last.map { ArmModel.restingHand($0.stance, $0.handedness).x * server.forward * Self.ballInHand } ?? 0
+        let wanted = min(max(paddle(server).x + hand, edge), config.tableWidth - edge)
+        let held = flight.ball.position.x
+        let most = Self.handSpeed * config.stepDuration
+        let x = snap ? wanted : held + min(max(wanted - held, -most), most)
         let y = server == .playerA ? -config.ballRadius * 3 : config.tableLength + config.ballRadius * 3
-        flight = Flight(ball: Ball(position: SIMD3(x, y, config.serveHeight)), hitter: server, isServe: true)
+        flight = Flight(ball: Ball(position: SIMD3(x, y, config.tossFrom)), hitter: server, isServe: true)
     }
 
     private func isInWindow(_ swingStep: UInt64, of chance: Chance) -> Bool {

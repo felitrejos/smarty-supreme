@@ -5,7 +5,10 @@ import Testing
 struct PredictionTests {
     @Test func thePredictedContactIsWhereTheEngineOffersTheChance() throws {
         var game = GameState(seed: 1)
-        _ = game.step(StepInput(swings: [Swing(side: .playerA, step: game.step, strength: 0.4, aim: 1)]))
+        var events = game.step(StepInput(swings: [Swing(side: .playerA, step: game.step, strength: 0.4, aim: 1)]))
+        for _ in 0..<2_400 where !events.contains(.served(.playerA)) {
+            events = game.step(StepInput())
+        }
         let contact = try #require(game.predictedContact(for: .playerB))
 
         for _ in 1..<contact.stepsAway {
@@ -19,7 +22,10 @@ struct PredictionTests {
 
     @Test func aBallGoingAwayHasNoContactForTheHitter() {
         var game = GameState(seed: 1)
-        _ = game.step(StepInput(swings: [Swing(side: .playerA, step: game.step, strength: 0, aim: 0)]))
+        var events = game.step(StepInput(swings: [Swing(side: .playerA, step: game.step, strength: 0, aim: 0)]))
+        for _ in 0..<2_400 where !events.contains(.served(.playerA)) {
+            events = game.step(StepInput())
+        }
 
         #expect(game.predictedContact(for: .playerA) == nil)
     }
@@ -125,7 +131,7 @@ struct AIControllerTests {
                 continue
             }
             let turn = duel.step()
-            if turn.events.contains(.served(.playerB)) {
+            if turn.events.contains(.tossed(.playerB)) {
                 serves += 1
                 #expect(duel.game.step - 1 - since == serveDelay)
             }
@@ -152,7 +158,7 @@ struct AIControllerTests {
         #expect(duel.game.paddleX(of: .playerB) == pausedAt)
 
         var events = duel.step(command: .resume).events
-        while !events.contains(where: { if case .pointScored = $0 { true } else { false } }) {
+        for _ in 0..<24_000 where !events.contains(where: { if case .pointScored = $0 { true } else { false } }) {
             events += duel.step().events
         }
 

@@ -21,19 +21,21 @@ public struct GameConfig: Equatable, Sendable {
 
     public var contactDistance = 0.3
     public var lowestContact = -0.3
-    public var highestContact = 0.9
+    public var highestContact = 1.3
+    public var overheadFrom = 0.3
+    public var overheadFull = 0.6
     public var reachDownHeight = 0.08
-    public var paddleTravelMargin = 0.3
-    public var paddleSpeedInTableWidths = 1.2
+    public var paddleTravelMargin = 0.45
+    public var paddleSpeedInTableWidths = 1.5
     public var reach = 0.3
     public var swingWindow = 0.1
     public var swingThreshold = 0.8
-    public var serveThreshold = 1.5
-    public var fullSwingSpeed = 8.0
-    public var racketNormalRestitution = 0.878
-    public var racketRestitutionPerSpeed = 0.02
-    public var racketTangentialRestitution = 0.8
-    public var aimAssist = 0.35
+    public var fullSwingSpeed = 5.0
+    public var perceivedLag = 0.04
+    public var earlySwing = 0.1
+    public var lateSwing = 0.12
+    public var peakFalloff = 0.85
+    public var cleanTiming = 0.07
     public var sweetSpot = 0.25
     public var lagCompensation = 0.06
     public var swingCooldown = 0.3
@@ -55,9 +57,14 @@ public struct GameConfig: Equatable, Sendable {
     public var netClearance = 0.04
 
     public var serveHeight = 0.25
+    public var tossFrom = 0.12
+    public var tossHeight = 0.45
     public var serveAngleDegrees = -14.0
     public var serveDepth = 0.75
     public var serveSpin = 15.0
+    public var serveSideSpin = 25.0
+    public var serveLiftSpin = 25.0
+    public var liftSpeed = 1.5
 
     public var autoServeAfter = 5.0
     public var autoServeStrength = 0.3
@@ -110,7 +117,7 @@ extension Side {
         self == .playerA ? .playerB : .playerA
     }
 
-    var forward: Double {
+    public var forward: Double {
         self == .playerA ? 1 : -1
     }
 }

@@ -16,6 +16,9 @@ struct SmartyHostApp: App {
                     ViewerView(viewer: viewer, stats: stats, showsFrameTimes: showsFrameTimes)
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                SettingsButton(controller: controller, showsFrameTimes: $showsFrameTimes)
+            }
             .frame(minWidth: 900, minHeight: 600)
             .onAppear(perform: controller.start)
         }

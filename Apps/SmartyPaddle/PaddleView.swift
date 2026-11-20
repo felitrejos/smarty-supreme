@@ -25,6 +25,11 @@ struct PaddleView: View {
         thermalState == .serious || thermalState == .critical
     }
 
+    private var isMyServe: Bool {
+        guard let state else { return false }
+        return state.phase == .serving && state.serving == state.side
+    }
+
     private var state: GameStateUpdate? {
         controller.link.gameState
     }
@@ -34,6 +39,16 @@ struct PaddleView: View {
     }
 
     private func content(_ snapshot: PaddleSensing.Snapshot) -> some View {
+        VStack(spacing: 0) {
+            face(snapshot)
+            Handle()
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 10)
+        .ignoresSafeArea(edges: .bottom)
+    }
+
+    private func face(_ snapshot: PaddleSensing.Snapshot) -> some View {
         RubberFace(side: state?.side ?? .playerA, swings: snapshot.swings) {
             VStack(spacing: 0) {
                 Text(state.map { $0.side.playerName.uppercased() } ?? "SMARTY SUPREME")
@@ -55,13 +70,13 @@ struct PaddleView: View {
                     controller.sensing.calibrate()
                 }
             }
+            .highPriorityGesture(TapGesture().onEnded { controller.link.requestToss() }, including: isMyServe ? .all : .subviews)
             .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { drag in
                 if !isMotionAvailable, TouchInput.isSwing(across: drag.translation.width, down: drag.translation.height) {
                     controller.swipeSwing()
                 }
             })
         }
-        .padding(10)
     }
 
     @ViewBuilder
@@ -99,15 +114,16 @@ struct PaddleView: View {
             case .inProgress:
                 Message(title: "HOLD STILL", detail: nil)
             case .failed(.handMoved):
-                Message(title: "HOLD IT LIKE A BAT", detail: "Your hand moved. Try again.")
+                Message(title: "TRY AGAIN", detail: "The phone moved. Tap, then hold it still for a second.")
             case .failed(.notUpright):
-                Message(title: "HOLD IT LIKE A BAT", detail: "Top pointing up. Try again.")
+                Message(title: "TRY AGAIN", detail: "Hold it like a bat, top pointing up.")
             case .needed, .calibrated:
-                Message(title: "HOLD IT LIKE A BAT", detail: "Screen toward you, top up.")
+                Message(title: "FACE THE MAC", detail: "Hold it like a bat, screen toward you, top up.")
             }
             PrimaryButton(title: "CALIBRATE", action: controller.sensing.calibrate)
                 .disabled(status == .inProgress)
                 .opacity(status == .inProgress ? 0.4 : 1)
+            HandPicker(handedness: controller.sensing.snapshot.handedness, choose: controller.choose)
         }
     }
 
@@ -118,6 +134,11 @@ struct PaddleView: View {
             PrimaryButton(title: "READY") { controller.link.setReady(true) }
         case .ready:
             Message(title: "READY", detail: "Starting when both players are.")
+        case .serving where state.serving == state.side:
+            VStack(spacing: 20) {
+                Score(state: state)
+                Hint("Tap to toss, then swing", tone: Paddle.Tone.cream.opacity(0.7))
+            }
         case .serving, .rally, .pointScored:
             Score(state: state)
         case .paused:
@@ -181,6 +202,14 @@ enum Paddle {
         static let woodDark = Color(red: 0.48, green: 0.31, blue: 0.18)
     }
 
+    enum Size {
+        static let bladeTop: CGFloat = 150
+        static let bladeBottom: CGFloat = 110
+        static let handleWidth: CGFloat = 104
+        static let handleHeight: CGFloat = 96
+        static let flare: CGFloat = 12
+    }
+
     enum Typeface {
         static let score = Font.custom("Futura-CondensedExtraBold", size: 96)
         static let title = Font.custom("Futura-Bold", size: 24)
@@ -198,7 +227,13 @@ private struct RubberFace<Content: View>: View {
     @State private var flash = 0.0
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 56, style: .continuous)
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: Paddle.Size.bladeTop,
+            bottomLeadingRadius: Paddle.Size.bladeBottom,
+            bottomTrailingRadius: Paddle.Size.bladeBottom,
+            topTrailingRadius: Paddle.Size.bladeTop,
+            style: .continuous
+        )
         ZStack {
             shape.fill(LinearGradient(colors: [Paddle.Tone.woodLight, Paddle.Tone.woodDark], startPoint: .topLeading, endPoint: .bottomTrailing))
             Pips(color: side.rubberColor)
@@ -214,6 +249,50 @@ private struct RubberFace<Content: View>: View {
                 flash = 0
             }
         }
+    }
+}
+
+private struct Handle: View {
+    var body: some View {
+        let width = Paddle.Size.handleWidth
+        ZStack(alignment: .top) {
+            HandleShape(flare: Paddle.Size.flare)
+                .fill(LinearGradient(colors: [Paddle.Tone.woodDark, Paddle.Tone.woodLight, Paddle.Tone.woodDark], startPoint: .leading, endPoint: .trailing))
+            HStack(spacing: 7) {
+                ForEach(0..<5) { _ in
+                    Capsule().fill(.black.opacity(0.12)).frame(width: 2)
+                }
+            }
+            .padding(.top, 26)
+            .padding(.bottom, 20)
+        }
+        .frame(width: width + 2 * Paddle.Size.flare, height: Paddle.Size.handleHeight)
+        .shadow(color: .black.opacity(0.45), radius: 8, y: 4)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct HandleShape: Shape {
+    let flare: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let neck = rect.insetBy(dx: flare, dy: 0)
+        var path = Path()
+        path.move(to: CGPoint(x: neck.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: neck.maxX, y: rect.minY))
+        path.addCurve(
+            to: CGPoint(x: rect.maxX, y: rect.maxY - rect.height * 0.28),
+            control1: CGPoint(x: neck.maxX, y: rect.minY + rect.height * 0.45),
+            control2: CGPoint(x: rect.maxX, y: rect.minY + rect.height * 0.5)
+        )
+        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - rect.height * 0.28), control: CGPoint(x: rect.midX, y: rect.maxY + rect.height * 0.12))
+        path.addCurve(
+            to: CGPoint(x: neck.minX, y: rect.minY),
+            control1: CGPoint(x: rect.minX, y: rect.minY + rect.height * 0.5),
+            control2: CGPoint(x: neck.minX, y: rect.minY + rect.height * 0.45)
+        )
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -303,6 +382,35 @@ private struct PrimaryButton: View {
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct HandPicker: View {
+    let handedness: Handedness
+    let choose: (Handedness) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            option(.left, title: "LEFT HAND")
+            option(.right, title: "RIGHT HAND")
+        }
+        .overlay(Capsule().strokeBorder(Paddle.Tone.cream.opacity(0.5), lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Playing hand")
+    }
+
+    private func option(_ hand: Handedness, title: String) -> some View {
+        Button { choose(hand) } label: {
+            Text(title)
+                .font(Paddle.Typeface.label)
+                .tracking(2)
+                .foregroundStyle(hand == handedness ? Paddle.Tone.ink : Paddle.Tone.cream.opacity(0.85))
+                .padding(.horizontal, 18)
+                .frame(minHeight: 40)
+                .background(hand == handedness ? Paddle.Tone.cream : .clear, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(hand == handedness ? .isSelected : [])
     }
 }
 
