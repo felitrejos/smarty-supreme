@@ -12,7 +12,6 @@ final class PaddleController {
 
     let sensing = PaddleSensing()
     let link: PaddleLink
-    let launchedAt: Microseconds
     let networkFailure = NetworkFailure()
     let haptics = HapticPlayer()
 
@@ -23,7 +22,7 @@ final class PaddleController {
     private var pendingDisconnect: DispatchWorkItem?
     private var isHalted = false
 
-    init(motion: MotionService, launchedAt: Microseconds) {
+    init(motion: MotionService) {
         let relay = EventRelay()
         transport = MultipeerTransport(mode: .browse, onEvent: relay.forward, onFailure: networkFailure.record)
         link = PaddleLink(
@@ -40,7 +39,6 @@ final class PaddleController {
         )
         relay.connect(link.handle)
         self.motion = motion
-        self.launchedAt = launchedAt
         sensing.setHandedness(UserDefaults.standard.bool(forKey: Self.leftHandedKey) ? .left : .right)
     }
 

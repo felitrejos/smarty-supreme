@@ -54,7 +54,7 @@ public struct AIController: Sendable {
             comingSince = nil
             plan = nil
             if case .serving(side, let since) = game.phase, game.step - since >= steps(profile.serveDelay, in: game.config) {
-                swing = makeSwing(in: game, aim: steerAway(from: game.paddleX(of: side), in: game).aim)
+                swing = makeSwing(in: game, aim: steerAway(in: game).aim)
             }
         }
         let next = moved(current, toward: goal, in: game.config)
@@ -69,7 +69,7 @@ public struct AIController: Sendable {
         let contactStep = Double(game.step + contact.stepsAway)
         let swingAt = UInt64(max(contactStep + gaussian() * profile.timingError * Double(config.stepsPerSecond), Double(game.step)).rounded())
         let steering = Double.random(in: 0..<1, using: &random) < profile.aimsAwayShare
-            ? steerAway(from: contact.position.x, in: game)
+            ? steerAway(in: game)
             : (contact: 0, aim: Double.random(in: -1...1, using: &random))
         return Plan(
             paddleX: contact.position.x - steering.contact * config.reach + gaussian() * profile.aimError,
@@ -78,7 +78,7 @@ public struct AIController: Sendable {
         )
     }
 
-    private func steerAway(from contactX: Double, in game: GameState) -> (contact: Double, aim: Double) {
+    private func steerAway(in game: GameState) -> (contact: Double, aim: Double) {
         let config = game.config
         let target = (game.paddlePosition(of: side.opponent) < 0.5 ? Lane.right : Lane.left).centre(in: config)
         let wanted = min(max((target - config.tableWidth / 2) / (config.lateralSpan * config.tableWidth / 2), -1), 1)

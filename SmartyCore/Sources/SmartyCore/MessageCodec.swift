@@ -216,11 +216,6 @@ private struct ByteWriter {
         append(value.bitPattern)
     }
 
-    mutating func append(_ value: SIMD2<Float>) {
-        append(value.x)
-        append(value.y)
-    }
-
     mutating func append(_ value: SIMD3<Float>) {
         append(value.x)
         append(value.y)
@@ -281,10 +276,6 @@ private struct ByteReader {
         let value = Float(bitPattern: try uint32())
         guard value.isFinite else { throw .invalidPayload }
         return value
-    }
-
-    mutating func finitePair() throws(MessageDecodingError) -> SIMD2<Float> {
-        SIMD2(try finiteFloat(), try finiteFloat())
     }
 
     mutating func finiteTriple() throws(MessageDecodingError) -> SIMD3<Float> {

@@ -19,7 +19,6 @@ public final class HostLink: Sendable {
         public let orientation: simd_quatd
         public let angularVelocity: SIMD3<Double>
         public let linearVelocity: SIMD3<Double>
-        public let reach: SIMD3<Double>
     }
 
     public struct PaddleInput: Equatable, Sendable {
@@ -351,8 +350,7 @@ public final class HostLink: Sendable {
                 macTime: paddle.clockSync.macTime(forPeerTime: racket.sampledAt),
                 orientation: simd_quatd(ix: Double(q.x), iy: Double(q.y), iz: Double(q.z), r: Double(q.w)),
                 angularVelocity: SIMD3<Double>(racket.angularVelocity),
-                linearVelocity: SIMD3<Double>(racket.linearVelocity),
-                reach: SIMD3<Double>(racket.reach)
+                linearVelocity: SIMD3<Double>(racket.linearVelocity)
             ))
             if paddle.untakenRackets.count > Self.racketBacklog {
                 paddle.untakenRackets.removeFirst()

@@ -10,7 +10,7 @@ struct SmartyPaddleApp: App {
     init() {
         let motion = MotionService()
         _motion = State(initialValue: motion)
-        _controller = State(initialValue: PaddleController(motion: motion, launchedAt: SystemClock().now))
+        _controller = State(initialValue: PaddleController(motion: motion))
     }
 
     var body: some Scene {

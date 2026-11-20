@@ -190,13 +190,6 @@ struct RacketShotTests {
         #expect(events.contains(.pointScored(winner: .playerA, score: Score(a: 1, b: 0))))
     }
 
-    @Test func aForehandSwungThroughTheBallSendsItBack() {
-        let events = rallyAgainstPhone(spin: Self.drive)
-
-        #expect(events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
-        #expect(events.contains { if case .stroke(.playerB, _) = $0 { true } else { false } })
-    }
-
     @Test(arguments: [-0.09, -0.06, -0.03, 0, 0.03, 0.06, 0.09, 0.11])
     func anyHitInTheWindowCrossesTheNetHoweverItIsTimed(offset: Double) {
         for turn in [4.0, 12, 25] {

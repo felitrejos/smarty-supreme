@@ -28,7 +28,6 @@ enum CameraView: CaseIterable {
 struct StrokeTiming: Equatable {
     static let onTime = 0.025
 
-    let side: Side
     let timing: Double
     let number: Int
 
@@ -224,7 +223,7 @@ final class Match {
         referee.follow(events, game: session.game)
         for event in events {
             if case .stroke(let side, let timing) = event {
-                lastStroke = StrokeTiming(side: side, timing: timing, number: (lastStroke?.number ?? 0) + 1)
+                lastStroke = StrokeTiming(timing: timing, number: (lastStroke?.number ?? 0) + 1)
             }
         }
         publish()

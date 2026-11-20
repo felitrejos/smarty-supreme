@@ -16,7 +16,6 @@ public struct ViewerDisplay: Sendable {
         public let phase: GamePhase
         public let scoreA: Int
         public let scoreB: Int
-        public let serving: Side
         public let rally: Int
     }
 
@@ -54,7 +53,6 @@ public struct ViewerDisplay: Sendable {
             phase: snapshot.phase,
             scoreA: Int(snapshot.scoreA),
             scoreB: Int(snapshot.scoreB),
-            serving: snapshot.serving,
             rally: Int(snapshot.rally)
         )
     }

@@ -1,7 +1,5 @@
-// Which way along the table counts as a stroke for one player, so a backswing never counts. Calibration sets it toward
-// the table, but how a phone is held can reverse the reading, so it is learned from play: a serve swing always goes
-// toward the table and sets it outright, and in rallies a couple of balls whose hardest swing, seen whole, went clearly
-// the other way turn it round.
+// Which way along the table counts as a stroke, so a backswing never does. A held phone can reverse the reading, so a
+// serve swing sets it outright and a couple of rally balls swung clearly the other way turn it round.
 public struct SwingDirection: Equatable, Sendable {
     public static let wrongWayToTurn = 2
     public static let clearlyHard = 2.5
