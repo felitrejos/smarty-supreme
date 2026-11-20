@@ -428,7 +428,7 @@ private struct ControlsHint: View {
             case .phone:
                 Image(systemName: "iphone")
                     .foregroundStyle(.secondary)
-                Text("Swing it like a bat")
+                Text("Swing it like a paddle")
                     .foregroundStyle(.secondary)
             case .computer(let difficulty):
                 Text(difficulty.title)
@@ -442,7 +442,7 @@ private struct ControlsHint: View {
         case .keyboard(let aim, let swing):
             "\(name(side)) aims with \(aim.joined(separator: " and ")) and swings with \(swing) as the ball comes."
         case .phone:
-            "\(name(side)) swings the iPhone like a bat."
+            "\(name(side)) swings the iPhone like a paddle."
         case .computer(let difficulty):
             "\(name(side)) plays at \(difficulty.title) difficulty."
         }

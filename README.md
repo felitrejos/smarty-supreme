@@ -3,14 +3,17 @@
   <img alt="Smarty Supreme" src="docs/brand/header.png">
 </picture>
 
-<p align="center"><b>Table tennis, 1952. Your iPhone is the bat.</b></p>
+<p align="center"><b>Table tennis on the Mac. The paddle is your iPhone.</b></p>
 
-![A rally at Player A's end, under the lights of a packed arena](docs/screenshots/arena.jpg)
+![A rally at Player A's end, under the lights of a packed arena](docs/screenshots/rally.gif)
 
-A packed hall, one table under the lights, an umpire calling every point, and a computer opponent who learned to talk on tech Twitter. Your phone is the bat: angle the face to aim, swing harder for pace, brush up for topspin, tap the screen to toss a serve. Your player walks to the ball.
+Smarty Supreme is a table tennis game for the Mac. You play it by swinging your iPhone as the paddle. The match is in a packed hall, with one table under the lights and an umpire calling every point. Your player walks to the ball automatically, so the timing and the stroke are yours. The computer opponent talks like tech Twitter.
 
-- **Play the computer** on Easy, Medium or Hard, and hear about it when you miss.
-- **Play a friend** side by side in split screen, or bring a second Mac so each of you gets a full screen.
-- **No phone?** Play on the keyboard: press W as the ball comes and your player swings on time; hold A/D to aim. Player B uses ↑ and ← →.
+- **Swing.** Tilt the paddle face to aim, and swing harder for more pace. Brush up for topspin, chop down for backspin. Hold the screen toward you for a forehand and turn it away for a backhand.
+- **Serve.** Tap the phone’s screen to toss the ball, then swing as it falls.
+- **Time it.** A ring shrinks onto the ball. An early swing pulls the shot cross-court and a late one sends it down the line. The phone buzzes crisply for a clean hit and dully for an edge.
+- **Play the computer** on Easy, Medium or Hard.
+- **Play a friend** side by side in split screen on one Mac, or use a second Mac as Player B’s screen.
+- **No phone?** Any side without a phone plays on the keyboard. Player A presses W to swing or serve and holds A/D to aim. Player B uses ↑ and ←/→.
 
-Needs macOS 26 and iOS 18. [Build it from source](docs/DEVELOPMENT.md).
+Needs macOS 26 and iOS 18. To build it from source, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).

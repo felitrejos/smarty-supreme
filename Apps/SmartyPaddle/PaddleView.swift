@@ -116,9 +116,9 @@ struct PaddleView: View {
             case .failed(.handMoved):
                 Message(title: "TRY AGAIN", detail: "The phone moved. Tap, then hold it still for a second.")
             case .failed(.notUpright):
-                Message(title: "TRY AGAIN", detail: "Hold it like a bat, top pointing up.")
+                Message(title: "TRY AGAIN", detail: "Hold it like a paddle, top pointing up.")
             case .needed, .calibrated:
-                Message(title: "FACE THE MAC", detail: "Hold the phone upright like a bat. You read this screen; the Mac sees the phone’s back.")
+                Message(title: "FACE THE MAC", detail: "Hold the phone upright like a paddle. You read this screen; the Mac sees the phone’s back.")
             }
             PrimaryButton(title: "CALIBRATE", action: controller.sensing.calibrate)
                 .disabled(status == .inProgress)

@@ -64,7 +64,7 @@ private enum Lesson: CaseIterable {
     var title: String {
         switch self {
         case .stand: "Face the Mac"
-        case .calibrate: "Hold it like a bat"
+        case .calibrate: "Hold it like a paddle"
         case .strokes: "Forehand or backhand"
         case .serve: "Toss, then serve"
         case .timing: "Swing as the ring closes"
