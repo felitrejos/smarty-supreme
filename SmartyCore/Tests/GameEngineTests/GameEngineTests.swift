@@ -200,16 +200,9 @@ struct RacketShotTests {
     @Test(arguments: [-0.09, -0.06, -0.03, 0, 0.03, 0.06, 0.09, 0.11])
     func anyHitInTheWindowCrossesTheNetHoweverItIsTimed(offset: Double) {
         for turn in [4.0, 12, 25] {
-            var game = GameState(seed: 1)
-            _ = serveAndToss(&game)
-            let contactStep = game.step + game.predictedContact(for: .playerB)!.stepsAway
-            _ = game.run(steps: Int(contactStep - game.step) + 40, input: phoneTracking(.playerB))
-            let swingStep = UInt64(Double(contactStep) + (game.config.perceivedLag + offset) * Double(game.config.stepsPerSecond))
-            var events = game.step(StepInput(rackets: [RacketSample(side: .playerB, step: swingStep, orientation: ArmModel.restOrientation, angularVelocity: SIMD3(0, 0, turn))]))
-            events += game.run(steps: 480)
-            let afterHit = events.drop { if case .hit(.playerB, _, _) = $0 { false } else { true } }
+            let swing = phoneSwing { t in Self.bump(turn, at: offset, t) }
 
-            #expect(afterHit.first { if case .bounce = $0 { true } else { false } } == .bounce(.playerA), "offset \(offset) turn \(turn)")
+            #expect(Self.firstBounceAfterTheHit(in: swing.events) == .bounce(.playerA), "offset \(offset) turn \(turn)")
         }
     }
 
@@ -221,22 +214,140 @@ struct RacketShotTests {
         #expect(firstBounceAfterHit(holding: ArmModel.restOrientation, offset: 0.11) == .bounce(.playerA))
     }
 
-    @Test func theBallOnlyWaitsForAHitWhileThePlayerIsSwinging() {
-        for swinging in [false, true] {
-            var game = GameState(seed: 1)
-            _ = serveAndToss(&game)
-            let contactStep = game.step + game.predictedContact(for: .playerB)!.stepsAway
-            var awaited = false
-            for _ in 0..<Int(contactStep - game.step) + 20 {
-                let turn = swinging && game.step + 10 >= contactStep ? 12.0 : 0
-                var input = phoneTracking(.playerB)(game)
-                input.rackets = [RacketSample(side: .playerB, step: game.step, orientation: ArmModel.restOrientation, angularVelocity: SIMD3(0, 0, turn))]
-                _ = game.step(input)
-                awaited = awaited || game.isAwaitingPhoneHit
-            }
+    @Test func aHitCommitsAsTheSwingNearsItsPeakBeforeThePeakIsConfirmed() {
+        let swung = liveSwing(peakingLate: 0)
+        let still = liveSwing(peakingLate: 0, turn: 0)
+        let hit = Int(swung.hitStep ?? 0)
 
-            #expect(awaited == swinging)
+        #expect((swung.peakStep - 3...swung.peakStep).contains(hit))
+        #expect(still.hitStep == nil)
+    }
+
+    @Test func aRefinedHitSendsOneHitThenOneStrokeWithTheFinalTiming() {
+        let swing = liveSwing(peakingLate: 0.03)
+        let hits = swing.events.indices.filter { if case .hit(.playerB, _, _) = swing.events[$0] { true } else { false } }
+        let strokes = swing.events.indices.filter { if case .stroke(.playerB, _) = swing.events[$0] { true } else { false } }
+
+        #expect(hits.count == 1)
+        #expect(strokes.count == 1)
+        #expect(hits.first! < strokes.first!)
+        #expect(abs(swing.game.lastSwing!.timing - 0.03) < 0.01)
+    }
+
+    @Test func aSwingSeenLiveEndsInTheSameReturnAsTheSameSwingSeenLate() {
+        let live = liveSwing(peakingLate: 0.02)
+        let late = liveSwing(peakingLate: 0.02, deliveredLate: true)
+
+        #expect(simd_distance(live.game.ball.position, late.game.ball.position) < 1e-9)
+        #expect(live.game.lastSwing?.timing == late.game.lastSwing?.timing)
+    }
+
+    @Test func aSwingThatLevelsOffThenSurgesIsHitAtItsRealPeakLiveOrLate() {
+        let surging = { (t: Double) -> Double in
+            let rates: [Double] = [0, 6, 6.5, 10, 14, 16, 10, 4, 0]
+            let index = Int(((t + 0.07) / 0.01).rounded())
+            return rates.indices.contains(index) ? rates[index] : 0
         }
+        let live = phoneSwing(surging)
+        let late = phoneSwing(surging, deliveredLate: true)
+
+        #expect(live.game.lastSwing.map { $0.peakSpeed > 3.5 } == true)
+        #expect(simd_distance(live.game.ball.position, late.game.ball.position) < 1e-9)
+    }
+
+    @Test func aBatDriftingBeforeTheStrokeIsNotTheHit() {
+        let drifting = { (t: Double) in max(3.5, Self.bump(16, at: 0, t)) }
+        let swing = phoneSwing(drifting)
+
+        #expect(swing.game.lastSwing.map { $0.peakSpeed > 3.5 && abs($0.timing) < 0.02 } == true)
+        #expect(!phoneSwing { _ in 3.5 }.events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
+    }
+
+    @Test func aBackswingBeforeTheStrokeIsNotTheHit() {
+        let swing = phoneSwing { t in Self.bump(-5, at: -0.11, t) + Self.bump(16, at: 0, t) }
+
+        #expect(swing.game.lastSwing.map { $0.peakSpeed > 3.5 && abs($0.timing) < 0.02 } == true)
+    }
+
+    private static func bump(_ height: Double, at centre: Double, _ t: Double, halfWidth: Double = 0.05) -> Double {
+        abs(t - centre) < halfWidth ? height * 0.5 * (1 + cos(.pi * (t - centre) / halfWidth)) : 0
+    }
+
+    private func phoneSwing(_ turn: @escaping (Double) -> Double, deliveredLate: Bool = false) -> (game: GameState, events: [GameEvent], launchSpeed: Double?) {
+        phoneSwing({ t in SIMD3(0, 0, turn(t)) }, deliveredLate: deliveredLate)
+    }
+
+    // A swing sampled every 10 ms like the phone, rotating at `turn(t)` at t seconds from the ideal moment; the samples
+    // arrive as they're taken, or all together after the swing. Runs until the point is over.
+    private func phoneSwing(
+        _ turn: @escaping (Double) -> SIMD3<Double>,
+        holding orientation: simd_quatd = ArmModel.restOrientation,
+        standing: @escaping (GameState) -> StepInput = phoneTracking(.playerB),
+        config: GameConfig = GameConfig(),
+        deliveredLate: Bool = false,
+        through last: Double = 0.13
+    ) -> (game: GameState, events: [GameEvent], launchSpeed: Double?) {
+        var game = GameState(seed: 1, config: config)
+        _ = serveAndToss(&game)
+        let contactStep = game.step + game.predictedContact(for: .playerB)!.stepsAway
+        let perSecond = Double(game.config.stepsPerSecond)
+        let ideal = Double(contactStep) + game.config.perceivedLag * perSecond
+        let samples = stride(from: -0.3, through: last, by: 0.01).map { t in
+            RacketSample(side: .playerB, step: UInt64((ideal + t * perSecond).rounded()), orientation: orientation, angularVelocity: turn(t))
+        }
+        let deliverAt = UInt64((ideal + 0.13 * perSecond).rounded())
+        var events: [GameEvent] = []
+        var launchSpeed: Double?
+        var next = 0
+        while game.step < contactStep + 1_200, !scoredAPoint(game, events) {
+            var input = standing(game)
+            if deliveredLate {
+                input.rackets = game.step == deliverAt ? samples : []
+            } else {
+                while next < samples.count, samples[next].step <= game.step {
+                    input.rackets.append(samples[next])
+                    next += 1
+                }
+            }
+            let happened = game.step(input)
+            if launchSpeed == nil, happened.contains(where: { if case .stroke(.playerB, _) = $0 { true } else { false } }) {
+                launchSpeed = game.ball.speed
+            }
+            events += happened
+        }
+        return (game, events, launchSpeed)
+    }
+
+    // A swing easing up to `turn` rad/s and back over 50 ms either side, peaking `peakingLate` after the ideal moment;
+    // its samples arrive as it happens, or all at once well after the ball has passed.
+    private func liveSwing(peakingLate offset: Double, turn: Double = 16, deliveredLate: Bool = false) -> (game: GameState, events: [GameEvent], peakStep: Int, hitStep: UInt64?) {
+        var game = GameState(seed: 1)
+        _ = serveAndToss(&game)
+        let contactStep = game.step + game.predictedContact(for: .playerB)!.stepsAway
+        let perSecond = Double(game.config.stepsPerSecond)
+        let peakStep = Int(Double(contactStep) + (game.config.perceivedLag + offset) * perSecond)
+        func sample(at step: UInt64) -> RacketSample {
+            let away = Double(abs(Int(step) - peakStep))
+            let speed = away < 12 ? turn * 0.5 * (1 + cos(.pi * away / 12)) : 0
+            return RacketSample(side: .playerB, step: step, orientation: ArmModel.restOrientation, angularVelocity: SIMD3(0, 0, speed))
+        }
+        var events: [GameEvent] = []
+        var hitStep: UInt64?
+        let deliverAt = UInt64(peakStep + 30)
+        while game.step < contactStep + 200 {
+            var input = phoneTracking(.playerB)(game)
+            if !deliveredLate {
+                input.rackets = [sample(at: game.step)]
+            } else if game.step == deliverAt {
+                input.rackets = (UInt64(peakStep - 14)...UInt64(peakStep + 14)).map(sample(at:))
+            }
+            let happened = game.step(input)
+            if hitStep == nil, happened.contains(where: { if case .hit(.playerB, _, _) = $0 { true } else { false } }) {
+                hitStep = game.step
+            }
+            events += happened
+        }
+        return (game, events, peakStep, hitStep)
     }
 
     @Test func aHardSwingTimedRightLeavesFasterThanTheSameSwingMistimed() {
@@ -244,47 +355,58 @@ struct RacketShotTests {
     }
 
     private func returnSpeed(offset: Double) -> Double {
-        var game = GameState(seed: 1)
-        _ = serveAndToss(&game)
-        let contactStep = game.step + game.predictedContact(for: .playerB)!.stepsAway
-        _ = game.run(steps: Int(contactStep - game.step) + 40, input: phoneTracking(.playerB))
-        let swingStep = UInt64(Double(contactStep) + (game.config.perceivedLag + offset) * Double(game.config.stepsPerSecond))
-        _ = game.step(StepInput(rackets: [RacketSample(side: .playerB, step: swingStep, orientation: ArmModel.restOrientation, angularVelocity: SIMD3(0, 0, 25))]))
-        _ = game.run(until: { _, events in events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } } })
-        return game.ball.speed
+        phoneSwing { t in Self.bump(25, at: offset, t) }.launchSpeed ?? 0
     }
 
     private func firstBounceAfterHit(holding orientation: simd_quatd, offset: Double) -> GameEvent? {
-        var game = GameState(seed: 1)
-        _ = serveAndToss(&game)
-        let contactStep = game.step + game.predictedContact(for: .playerB)!.stepsAway
-        _ = game.run(steps: Int(contactStep - game.step) + 40, input: phoneTracking(.playerB))
-        let swingStep = UInt64(Double(contactStep) + (game.config.perceivedLag + offset) * Double(game.config.stepsPerSecond))
-        var events = game.step(StepInput(rackets: [RacketSample(side: .playerB, step: swingStep, orientation: orientation, angularVelocity: SIMD3(0, 0, 12))]))
-        events += game.run(steps: 480)
-        return events.drop { if case .hit(.playerB, _, _) = $0 { false } else { true } }.first { if case .bounce = $0 { true } else { false } }
+        Self.firstBounceAfterTheHit(in: phoneSwing({ t in SIMD3(0, 0, Self.bump(12, at: offset, t)) }, holding: orientation).events)
+    }
+
+    private static func firstBounceAfterTheHit(in events: [GameEvent]) -> GameEvent? {
+        events.drop { if case .hit(.playerB, _, _) = $0 { false } else { true } }.first { if case .bounce = $0 { true } else { false } }
     }
 
     @Test(arguments: [4.0, 8, 15, 25])
     func aCleanHitLandsOnTheOtherHalfHoweverHardItIsSwung(turn: Double) {
-        var game = GameState(seed: 1)
-        _ = serveAndToss(&game)
-        let contactStep = game.step + game.predictedContact(for: .playerB)!.stepsAway
-        _ = game.run(steps: Int(contactStep - game.step) + 20, input: phoneTracking(.playerB))
-        let swingStep = contactStep + UInt64(game.config.perceivedLag * Double(game.config.stepsPerSecond))
-        var events = game.step(StepInput(rackets: [RacketSample(side: .playerB, step: swingStep, orientation: ArmModel.restOrientation, angularVelocity: SIMD3(0, 0, turn))]))
-        events += game.run(steps: 480)
-        let afterHit = events.drop { if case .hit(.playerB, _, _) = $0 { false } else { true } }
+        let swing = phoneSwing { t in Self.bump(turn, at: 0, t) }
 
-        #expect(game.lastSwing?.outcome == .clean)
-        #expect(afterHit.first { if case .bounce = $0 { true } else { false } } == .bounce(.playerA))
+        #expect(swing.game.lastSwing?.outcome == .clean)
+        #expect(Self.firstBounceAfterTheHit(in: swing.events) == .bounce(.playerA))
     }
 
-    @Test func aSwingReadAsGoingAwayFromTheTableStillSendsTheBallBack() {
-        let events = rallyAgainstPhone(spin: -Self.drive)
+    @Test func aSwingAwayFromTheTableIsNotAStroke() {
+        #expect(!rallyAgainstPhone(spin: -Self.drive).contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
+    }
 
-        #expect(events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
-        #expect(events.contains { if case .stroke(.playerB, _) = $0 { true } else { false } })
+    @Test func aBackswingInsideTheWindowIsNotTheHitTheStrokeAfterItIs() {
+        let swing = phoneSwing { t in Self.bump(-9, at: -0.05, t, halfWidth: 0.03) + Self.bump(16, at: 0, t, halfWidth: 0.04) }
+
+        #expect(swing.game.lastSwing.map { $0.peakSpeed > 3.5 && abs($0.timing) < 0.02 } == true)
+    }
+
+    @Test func aLateStrokeAfterABackswingInTheWindowDoesNotCountAsSwingingTheOtherWay() {
+        let swing = phoneSwing({ t in SIMD3(0, 0, Self.bump(-12, at: -0.05, t, halfWidth: 0.04) + Self.bump(16, at: 0.2, t)) }, through: 0.3)
+
+        #expect(swing.game.swingDirection(of: .playerB).wrongWayInARow == 0)
+    }
+
+    @Test func aHardSwingOnlyTheOtherWayCountsOnce() {
+        let swing = phoneSwing { t in Self.bump(-16, at: 0, t) }
+
+        #expect(swing.game.swingDirection(of: .playerB).wrongWayInARow == 1)
+    }
+
+    @Test func recalibratingForgetsWhatWasLearnedAboutTheDirection() {
+        var game = phoneSwing { t in Self.bump(-16, at: 0, t) }.game
+        game.resetSwingDirection(of: .playerB)
+
+        #expect(game.swingDirection(of: .playerB) == SwingDirection())
+    }
+
+    @Test func aSlowEarlySwingStillHits() {
+        let swing = phoneSwing { t in Self.bump(16, at: -0.09, t, halfWidth: 0.25) }
+
+        #expect(swing.events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
     }
 
     @Test func aBackhandHeldPhoneReturnsABallSetUpOnTheBackhand() {
@@ -325,18 +447,11 @@ struct RacketShotTests {
         #expect(!rallyAgainstPhone(spin: chop).contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
     }
 
-    @Test func aPhoneSampleThatArrivesLateStillCounts() {
-        var game = GameState(seed: 1)
-        _ = serveAndToss(&game)
-        let contactStep = game.step + game.predictedContact(for: .playerB)!.stepsAway
-        _ = game.run(steps: Int(contactStep - game.step) + 20, input: phoneTracking(.playerB))
-        let swingStep = contactStep + UInt64(game.config.perceivedLag * Double(game.config.stepsPerSecond))
+    @Test func aSwingWhoseSamplesAllArriveLateStillCounts() {
+        let swing = phoneSwing({ t in Self.bump(15, at: 0, t) }, deliveredLate: true)
 
-        var events = game.step(StepInput(rackets: [RacketSample(side: .playerB, step: swingStep, orientation: ArmModel.restOrientation, angularVelocity: Self.drive)]))
-        events += game.run(steps: 120)
-
-        #expect(events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
-        #expect(game.ball.velocity.y < 0)
+        #expect(swing.events.contains { if case .hit(.playerB, _, _) = $0 { true } else { false } })
+        #expect(Self.firstBounceAfterTheHit(in: swing.events) == .bounce(.playerA))
     }
 
     @Test func forehandAndBackhandPhoneServesCurveOppositeWaysAndStillLand() {
@@ -370,7 +485,16 @@ struct RacketShotTests {
         #expect(chop.landed && lift.landed)
     }
 
-    private func phoneServe(holding orientation: simd_quatd, drop: Double = 0) -> (spin: SIMD3<Double>, landed: Bool) {
+    @Test func aServeSwungTheOtherWayTeachesThatWayAsForward() {
+        let usual = phoneServe(holding: ArmModel.restOrientation)
+        let reversed = phoneServe(holding: ArmModel.restOrientation, turning: -1)
+
+        #expect(usual.forward == 1)
+        #expect(reversed.forward == -1)
+        #expect(usual.landed && reversed.landed)
+    }
+
+    private func phoneServe(holding orientation: simd_quatd, drop: Double = 0, turning: Double = 1) -> (spin: SIMD3<Double>, landed: Bool, forward: Double) {
         var game = GameState(seed: 1)
         var events = game.step(StepInput(rackets: [RacketSample(side: .playerA, step: game.step, orientation: orientation, angularVelocity: .zero)], tosses: [.playerA]))
         let strike = game.predictedServeStrike(for: .playerA)!.stepsAway + UInt64(game.config.perceivedLag * Double(game.config.stepsPerSecond))
@@ -380,36 +504,25 @@ struct RacketShotTests {
                 side: .playerA,
                 step: game.step,
                 orientation: orientation,
-                angularVelocity: SIMD3(0, 0, speed),
+                angularVelocity: SIMD3(0, 0, turning * speed),
                 linearVelocity: SIMD3(0, 0, -drop * speed / 16)
             )]))
         }
         let spin = game.ball.spin
+        let forward = game.swingDirection(of: .playerA).sign
         events += game.run(steps: 480)
         #expect(events.contains { if case .stroke(.playerA, let timing) = $0 { abs(timing) <= game.config.cleanTiming } else { false } })
         let landed = events.contains(.bounce(.playerB)) && !events.contains { if case .pointScored(winner: .playerB, _) = $0 { true } else { false } }
-        return (spin, landed)
+        return (spin, landed, forward)
     }
 
+    // An on-time swing whose rotation rate rises to `spin` and falls back.
     private func rallyAgainstPhone(spin: SIMD3<Double>, holding orientation: simd_quatd = ArmModel.restOrientation, standing: @escaping (GameState) -> StepInput = phoneTracking(.playerB), config: GameConfig = GameConfig()) -> [GameEvent] {
-        var game = GameState(seed: 1, config: config)
-        _ = serveAndToss(&game)
-        return game.run(until: scoredAPoint) { state in
-            var input = standing(state)
-            input.rackets = [RacketSample(side: .playerB, step: state.step, orientation: orientation, angularVelocity: spin)]
-            return input
-        }
+        phoneSwing({ t in spin * Self.bump(1, at: 0, t) }, holding: orientation, standing: standing, config: config).events
     }
 
     private func returnSpeed(spin: SIMD3<Double>) -> Double {
-        var game = GameState(seed: 1)
-        _ = serveAndToss(&game)
-        _ = game.run(until: { _, events in events.contains { if case .hit = $0 { true } else { false } } }) { state in
-            var input = phoneTracking(.playerB)(state)
-            input.rackets = [RacketSample(side: .playerB, step: state.step, orientation: ArmModel.restOrientation, angularVelocity: spin)]
-            return input
-        }
-        return game.ball.speed
+        phoneSwing { t in spin * Self.bump(1, at: 0, t) }.launchSpeed ?? 0
     }
 }
 
@@ -678,5 +791,53 @@ extension GameState {
         }
         Issue.record("Condition not reached within \(limit) steps")
         return events
+    }
+}
+
+struct SwingDirectionTests {
+    @Test func ballsSwungClearlyTheOtherWayTurnTheDirectionRound() {
+        var direction = SwingDirection()
+        for _ in 1...SwingDirection.wrongWayToTurn {
+            direction.judge(forward: 0.3, backward: 4)
+        }
+
+        #expect(direction.sign == -1)
+    }
+
+    @Test func aLatePlayersBackswingNeverCountsAgainstThemWhenTheStrokeFollows() {
+        var direction = SwingDirection()
+        for _ in 1...5 {
+            direction.judge(forward: 4, backward: 2.6)
+        }
+
+        #expect(direction.sign == 1)
+        #expect(direction.wrongWayInARow == 0)
+    }
+
+    @Test func aWrongTurnTurnsBackAfterTheSameEvidence() {
+        var direction = SwingDirection()
+        for _ in 1...SwingDirection.wrongWayToTurn {
+            direction.judge(forward: 0.3, backward: 4)
+        }
+        for _ in 1...SwingDirection.wrongWayToTurn {
+            direction.judge(forward: 0.3, backward: 4)
+        }
+
+        #expect(direction.sign == 1)
+    }
+
+    @Test func aServeSwingSetsWhichWayIsForward() {
+        var direction = SwingDirection()
+        direction.served(SIMD3(0, -3, 0))
+
+        #expect(direction.forward(SIMD3(0, -3, 0)) == 3)
+        #expect(direction.forward(SIMD3(0, 3, 0)) == 0)
+    }
+
+    @Test func aGentleSwingTheOtherWayDoesNotCount() {
+        var direction = SwingDirection()
+        direction.judge(forward: 0, backward: 2)
+
+        #expect(direction.wrongWayInARow == 0)
     }
 }

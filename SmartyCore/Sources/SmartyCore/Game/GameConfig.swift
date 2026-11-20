@@ -35,6 +35,10 @@ public struct GameConfig: Equatable, Sendable {
     public var earlySwing = 0.1
     public var lateSwing = 0.12
     public var peakFalloff = 0.85
+    public var swingRefinement = 0.12
+    public var nearTopGrowth = 30.0
+    public var swingRiseFrom = 0.5
+    public var swingRiseLookback = 0.25
     public var cleanTiming = 0.07
     public var sweetSpot = 0.25
     public var lagCompensation = 0.06

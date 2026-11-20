@@ -36,6 +36,7 @@ final class PaddleSensing: Sendable {
         var expectedContact: Microseconds?
         var swingPeak = 0.0
         var swingPeakAt: Microseconds = 0
+        var swingLow = Double.infinity
         var detector = SwingDetector()
         var touchPosition: Double?
         var handedness = Handedness.right
@@ -44,12 +45,16 @@ final class PaddleSensing: Sendable {
         var sensorError: String?
     }
 
-    private static let earlySwing: Microseconds = 100_000
-    private static let lateSwing: Microseconds = 120_000
-    private static let cleanTiming: Microseconds = 70_000
-    private static let swingThreshold = 0.8
-    private static let peakFalloff = 0.85
-    private static let fullSwing = 5.0
+    // The buzz judges a swing with the engine's own settings, so the phone and the Mac agree on a hit.
+    private static let engine = GameConfig()
+    private static let earlySwing = Microseconds(engine.earlySwing * 1_000_000)
+    private static let lateSwing = Microseconds(engine.lateSwing * 1_000_000)
+    private static let cleanTiming = Microseconds(engine.cleanTiming * 1_000_000)
+    private static let swingThreshold = engine.swingThreshold
+    private static let peakFalloff = engine.peakFalloff
+    private static let fullSwing = engine.fullSwingSpeed
+    private static let riseFrom = engine.swingRiseFrom
+    private static let riseLookback = Microseconds(engine.swingRiseLookback * 1_000_000)
 
     private let state = Mutex(State())
 
@@ -114,7 +119,7 @@ final class PaddleSensing: Sendable {
                 let pose = tracker.update(sample)
                 state.tracker = tracker
                 outcome.pose = pose
-                outcome.contact = feelContact(forward: abs(pose.bladeVelocity(state.handedness).y), at: sample.time, in: &state)
+                outcome.contact = feelContact(forward: max(pose.bladeVelocity(state.handedness).y, 0), at: sample.time, in: &state)
             }
             return outcome
         }
@@ -128,6 +133,7 @@ final class PaddleSensing: Sendable {
         state.withLock { state in
             state.expectedContact = time
             state.swingPeak = 0
+            state.swingLow = .infinity
         }
     }
 
@@ -141,13 +147,31 @@ final class PaddleSensing: Sendable {
             state.expectedContact = nil
             return nil
         }
-        guard time + Self.earlySwing >= contact else { return nil }
+        guard time + Self.earlySwing >= contact else {
+            // Like the Mac, a swing may start climbing a little before the window opens.
+            if time + Self.earlySwing + Self.riseLookback >= contact {
+                state.swingLow = min(state.swingLow, forward)
+            }
+            return nil
+        }
+        if state.swingLow == .infinity {
+            state.swingLow = forward
+        }
         if forward > state.swingPeak {
             state.swingPeak = forward
             state.swingPeakAt = time
             return nil
         }
-        guard state.swingPeak >= Self.swingThreshold, forward < state.swingPeak * Self.peakFalloff else { return nil }
+        guard state.swingPeak >= Self.swingThreshold, forward < state.swingPeak * Self.peakFalloff else {
+            state.swingLow = min(state.swingLow, forward)
+            return nil
+        }
+        // Like the Mac, only a swing that climbed from below half its peak is a stroke; otherwise start over from here.
+        guard state.swingLow < state.swingPeak * Self.riseFrom else {
+            state.swingPeak = forward
+            state.swingLow = forward
+            return nil
+        }
         state.expectedContact = nil
         let offset = state.swingPeakAt > contact ? state.swingPeakAt - contact : contact - state.swingPeakAt
         return Contact(strength: min(state.swingPeak / Self.fullSwing, 1), isClean: offset <= Self.cleanTiming)

@@ -25,29 +25,28 @@ struct TablePose {
     private static let serveStrength = 0.4
     private static let viewerHitStrength = 0.6
 
-    var step: UInt64
-    var ball: SIMD3<Double>
-    var velocity: SIMD3<Double>
-    var spin: SIMD3<Double>
-    var paddleA: Double
-    var paddleB: Double
-    var isRally: Bool
-    var contacts: [Contact]
-    var bounced: Bool
-    var netHitSpeed: Double?
-    var rewound = false
-    var stances: [Side: Stance]
-    var outcome: Outcome?
-    var dimmed: Set<Side>
-    var score: Score
-    var rackets: [Side: RacketSample]
-    var racketAges: [Side: Double]
-    var forecasts: [Side: Forecast]
-    var strokes: [Side: Double]
+    let ball: SIMD3<Double>
+    let velocity: SIMD3<Double>
+    let spin: SIMD3<Double>
+    let paddleA: Double
+    let paddleB: Double
+    let isRally: Bool
+    let contacts: [Contact]
+    let bounced: Bool
+    let netHitSpeed: Double?
+    let flight: UInt64
+    let stances: [Side: Stance]
+    let outcome: Outcome?
+    let dimmed: Set<Side>
+    let score: Score
+    let rackets: [Side: RacketSample]
+    let racketAges: [Side: Double]
+    let forecasts: [Side: Forecast]
+    let strokes: [Side: Double]
 
     init(game: GameState, events: [GameEvent], dimmed: Set<Side>, forecasts: [Side: Forecast], stances: [Side: Stance]) {
         self.stances = stances
-        step = game.step
+        flight = game.flightNumber
         ball = game.ball.position
         velocity = game.ball.velocity
         spin = game.ball.spin
@@ -80,7 +79,7 @@ struct TablePose {
     }
 
     init(frame: ViewerDisplay.Frame, previous: ViewerDisplay.Frame?) {
-        step = 0
+        flight = 0
         ball = frame.ball
         velocity = frame.velocity
         spin = .zero
@@ -214,6 +213,7 @@ final class TableScene {
     private var drawnBall: SIMD3<Float>?
     private var ballCorrection = SIMD3<Float>.zero
     private var ballShownFor: Float = 1
+    private var drawnFlight: UInt64 = 0
     private var cameraMoves = 0
     private var view = CameraView.playerAEnd
     private let config: GameConfig
@@ -325,7 +325,10 @@ final class TableScene {
     func update(to pose: TablePose, elapsed: TimeInterval) {
         var ballPosition = scenePoint(pose.ball)
         // A hit confirmed after the ball passed the bat replays its flight; ease the drawn ball onto it instead of jumping.
-        if pose.contacts.contains(where: { !$0.isWhiff }) || pose.rewound, let drawnBall, simd_distance(drawnBall, ballPosition) < Self.largestBallCatchUp {
+        // A refined phone hit swaps in a slightly different return; ease onto it as well.
+        let reshaped = pose.isRally && pose.flight != drawnFlight
+        drawnFlight = pose.flight
+        if pose.contacts.contains(where: { !$0.isWhiff }) || reshaped, let drawnBall, simd_distance(drawnBall, ballPosition) < Self.largestBallCatchUp {
             ballCorrection = drawnBall - ballPosition
         }
         ballCorrection *= exp(-Float(elapsed) / Self.ballCatchUp)
@@ -343,7 +346,7 @@ final class TableScene {
             }
         }
         drawnBall = ballPosition
-        if !pose.contacts.isEmpty {
+        if !pose.contacts.isEmpty || !pose.strokes.isEmpty {
             let timing = pose.strokes.values.first
             let tone = timing.map { abs($0) <= StrokeTiming.onTime ? Self.onTimeGlow : ($0 < 0 ? Self.earlyGlow : Self.lateGlow) } ?? Equipment.Tone.celluloid
             var material = UnlitMaterial(color: tone)

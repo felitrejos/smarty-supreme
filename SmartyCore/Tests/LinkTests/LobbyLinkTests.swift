@@ -79,6 +79,19 @@ struct LobbyLinkTests {
         #expect(harness.host.paddles.first { $0.side == .playerA }?.name == "Phone A")
     }
 
+    @Test func aCalibrationReachesTheSessionOnce() {
+        let harness = LinkHarness()
+        let phone = harness.addPhone("Phone A")
+        harness.run(for: 1_500_000)
+        _ = harness.host.takeInput()
+
+        phone.announceCalibration(.left)
+        harness.run(for: 50_000)
+
+        #expect(harness.host.takeInput().paddles[.playerA]?.recalibrated == true)
+        #expect(harness.host.takeInput().paddles[.playerA]?.recalibrated == false)
+    }
+
     @Test func aRelaunchedPhoneTakesOverBeforeItsOldConnectionIsNoticedGone() {
         let harness = LinkHarness()
         _ = harness.addPhone("Phone A")

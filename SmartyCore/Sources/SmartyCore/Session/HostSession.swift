@@ -153,14 +153,16 @@ public final class HostSession {
             publish(haptics: [])
             return []
         }
-        if gap <= config.longestFrame {
-            queuePhoneSwings()
-            queuePhoneRackets()
-            pendingTosses.formUnion(mode.phoneSides.filter { input.paddles[$0]?.tossRequested == true })
-        }
-        pendingSwings += local.swings.filter { controller(of: $0.side) == .local }
         unsimulatedSeconds += Double(min(gap, config.longestFrame)) / 1_000_000
         let stepDuration = 1 / Double(game.config.stepsPerSecond)
+        let lastStepThisFrame = game.step + UInt64(unsimulatedSeconds / stepDuration)
+        queuePhoneSwings(upTo: lastStepThisFrame)
+        queuePhoneRackets(upTo: lastStepThisFrame)
+        pendingTosses.formUnion(mode.phoneSides.filter { input.paddles[$0]?.tossRequested == true })
+        for side in mode.phoneSides where input.paddles[side]?.recalibrated == true {
+            game.resetSwingDirection(of: side)
+        }
+        pendingSwings += local.swings.filter { controller(of: $0.side) == .local }
         var events: [GameEvent] = []
         var haptics: [(Side, HapticKind)] = []
         while unsimulatedSeconds >= stepDuration {
@@ -214,7 +216,8 @@ public final class HostSession {
     }
 
     private func followThePlayers(at now: Microseconds) {
-        for side in mode.phoneSides where input.paddles[side]?.position != nil {
+        // A phone is in the match once it streams: a pointer from the touch fallback, or bat data from motion.
+        for side in mode.phoneSides where input.paddles[side]?.position != nil || input.paddles[side]?.lastRacketAt != nil {
             matchPhones.insert(side)
             reconnectDeadlines[side] = nil
         }
@@ -388,10 +391,11 @@ public final class HostSession {
         }
     }
 
-    private func queuePhoneRackets() {
+    // A sample is stamped at the step it was taken, never beyond the step the engine reaches this frame.
+    private func queuePhoneRackets(upTo latest: UInt64) {
         for side in Side.allCases where controller(of: side) == .phone {
             for racket in input.paddles[side]?.rackets ?? [] {
-                let step = racket.macTime.map(timeline.step(at:)) ?? game.step
+                let step = min(racket.macTime.map(timeline.step(at:)) ?? game.step, latest)
                 let stance = ArmModel.stance(of: racket.orientation, previous: phoneStances[side])
                 phoneStances[side] = stance
                 pendingRackets.append(RacketSample(
@@ -422,7 +426,7 @@ public final class HostSession {
     private func logSwing() {
         guard let swing = game.lastSwing, swing.number != loggedSwing else { return }
         loggedSwing = swing.number
-        Self.swingLog.info("\(swing.side.playerName, privacy: .public) \(swing.outcome.rawValue, privacy: .public) peak \(swing.peakSpeed, format: .fixed(precision: 2), privacy: .public) m/s timing \(Int(swing.timing * 1_000), privacy: .public) ms height \(Int(swing.ballHeight * 100), privacy: .public) cm | best forward \(swing.nearestPeakSpeed, format: .fixed(precision: 2), privacy: .public) m/s at \(Int(swing.nearestPeakOffset * 1_000), privacy: .public) ms | fastest \(swing.fastestBlade, format: .fixed(precision: 2), privacy: .public) m/s (forward \(swing.fastestBladeForward, format: .fixed(precision: 2), privacy: .public)) | body x \(Int(swing.paddleX * 100), privacy: .public) ball x \(Int(swing.ballX * 100), privacy: .public) cm stance \(String(describing: self.stances[swing.side] ?? .forehand), privacy: .public) | return \(self.describeReturn(swing), privacy: .public)")
+        Self.swingLog.info("\(swing.side.playerName, privacy: .public) \(swing.outcome.rawValue, privacy: .public) peak \(swing.peakSpeed, format: .fixed(precision: 2), privacy: .public) m/s timing \(Int(swing.timing * 1_000), privacy: .public) ms height \(Int(swing.ballHeight * 100), privacy: .public) cm | best forward \(swing.nearestPeakSpeed, format: .fixed(precision: 2), privacy: .public) m/s at \(Int(swing.nearestPeakOffset * 1_000), privacy: .public) ms | fastest \(swing.fastestBlade, format: .fixed(precision: 2), privacy: .public) m/s (forward \(swing.fastestBladeForward, format: .fixed(precision: 2), privacy: .public)) | body x \(Int(swing.paddleX * 100), privacy: .public) ball x \(Int(swing.ballX * 100), privacy: .public) cm stance \(String(describing: self.stances[swing.side] ?? .forehand), privacy: .public) | return \(self.describeReturn(swing), privacy: .public) | committed \(Int(swing.commitDelay * 1_000), privacy: .public) ms after contact at \(swing.committedPower, format: .fixed(precision: 2), privacy: .public) power")
     }
 
     private func announceIncomingBalls(at now: Microseconds) {
@@ -435,10 +439,10 @@ public final class HostSession {
         }
     }
 
-    private func queuePhoneSwings() {
+    private func queuePhoneSwings(upTo latest: UInt64) {
         for side in Side.allCases where controller(of: side) == .phone {
             for swing in input.paddles[side]?.swings ?? [] {
-                let step = swing.macPeakTime.map(timeline.step(at:)) ?? game.step
+                let step = min(swing.macPeakTime.map(timeline.step(at:)) ?? game.step, latest)
                 pendingSwings.append(Swing(side: side, step: step, strength: swing.strength, aim: 0))
             }
         }
@@ -479,7 +483,7 @@ public final class HostSession {
                 } else {
                     autoServes[side, default: 0] += 1
                 }
-            case .hit(let side, _, _) where !events.contains(where: { if case .stroke(side, _) = $0 { true } else { false } }):
+            case .hit(let side, _, _) where input.paddles[side]?.lastRacketAt == nil:
                 haptics.append((side, .hit))
             case .whiff(let side):
                 haptics.append((side, .miss))

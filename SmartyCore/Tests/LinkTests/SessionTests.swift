@@ -1,4 +1,5 @@
 import SmartyCore
+import simd
 import SmartyTestSupport
 import Testing
 
@@ -156,6 +157,26 @@ struct TwoPlayerMatchTests {
         phoneA.requestPause(false)
         harness.run(for: 200_000)
         #expect(harness.session.stage == .playing)
+    }
+
+    @Test func aMotionPhoneThatOnlyStreamsBatDataCanPauseTheGame() {
+        let harness = SessionHarness(mode: .computer(.medium))
+        let phone = harness.addPhone("Phone A", holding: nil)
+        let upright = simd_quatd(simd_double3x3(columns: (SIMD3(0, -1, 0), SIMD3(0, 0, 1), SIMD3(-1, 0, 0))))
+        var tracker = RacketTracker(calibratedAt: upright)
+        let streamBat = { (harness: SessionHarness) in
+            let now = harness.clock.now
+            let pose = tracker.update(MotionSample(time: now, userAcceleration: .zero, rotationRate: .zero, attitude: upright, gravity: upright.inverse.act(SIMD3(0, 0, -1))))
+            phone.sendRacket(pose, at: now)
+        }
+        harness.run(for: 2_000_000, everyFrame: streamBat)
+        harness.session.startNow()
+        harness.run(for: 500_000, everyFrame: streamBat)
+
+        phone.requestPause(true)
+        harness.run(for: 200_000, everyFrame: streamBat)
+
+        #expect(harness.session.stage == .interrupted(.byPlayer(.playerA)))
     }
 
     @Test func theMacCanResumeAPlayersPause() {

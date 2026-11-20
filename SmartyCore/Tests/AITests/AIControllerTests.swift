@@ -32,6 +32,12 @@ struct PredictionTests {
 }
 
 struct AIControllerTests {
+    @Test func aRefinedPhoneHitSettlesBeforeTheFastestComputerReacts() {
+        let fastest = Difficulty.allCases.map(\.profile.reactionDelay).min()!
+
+        #expect(GameConfig().swingRefinement < fastest)
+    }
+
     @Test(arguments: Difficulty.allCases)
     func paddleNeverMovesFasterThanTheSpeedCap(difficulty: Difficulty) {
         var duel = Duel(seed: 3, playerA: .scriptedAverage, playerB: difficulty.profile)

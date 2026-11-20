@@ -74,7 +74,7 @@ private enum Lesson: CaseIterable {
     var detail: String {
         switch self {
         case .stand: "Stand where you can swing freely, about 1.5 to 2.5 m back. Distance doesn’t matter to the game, but facing the Mac does."
-        case .calibrate: "Screen toward you, top up, facing the Mac. Tap Calibrate and hold still. Double-tap the phone to do it again."
+        case .calibrate: "Stand facing the Mac, phone upright. You see the screen and the Mac sees its back. Tap Calibrate and hold still. Double-tap the phone to redo it."
         case .strokes: "Show the screen to yourself for a forehand. Turn it so the screen faces the table for a backhand."
         case .serve: "Tap the phone’s screen to toss the ball, then swing as it falls. Forehand and backhand curve it opposite ways; chop down for backspin."
         case .timing: "The ring shrinks onto the ball. Swing as it closes: early pulls the ball cross-court, late sends it down the line."

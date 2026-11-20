@@ -33,6 +33,7 @@ public final class HostLink: Sendable {
         public let isReady: Bool
         public let pauseRequests: [Bool]
         public let tossRequested: Bool
+        public let recalibrated: Bool
         public let roundTrip: Microseconds?
     }
 
@@ -80,6 +81,7 @@ public final class HostLink: Sendable {
         var isReady = false
         var untakenPauseRequests: [Bool] = []
         var untakenToss = false
+        var untakenCalibration = false
 
         init(name: String, side: Side) {
             self.name = name
@@ -182,12 +184,14 @@ public final class HostLink: Sendable {
                     isReady: paddle.isReady,
                     pauseRequests: paddle.untakenPauseRequests,
                     tossRequested: paddle.untakenToss,
+                    recalibrated: paddle.untakenCalibration,
                     roundTrip: paddle.recentRoundTrip
                 )
                 state.paddles[peer]?.untakenSwings.removeAll()
                 state.paddles[peer]?.untakenRackets.removeAll()
                 state.paddles[peer]?.untakenPauseRequests.removeAll()
                 state.paddles[peer]?.untakenToss = false
+                state.paddles[peer]?.untakenCalibration = false
             }
             return Input(paddles: paddles, vacant: Set(state.vacancies.keys), viewerName: state.viewer?.name)
         }
@@ -363,6 +367,7 @@ public final class HostLink: Sendable {
             paddle.untakenSwings.append(received)
         case .calibrated(let handedness):
             paddle.handedness = handedness
+            paddle.untakenCalibration = true
         case .ready(let isReady):
             paddle.isReady = isReady
         case .pause(let pause):

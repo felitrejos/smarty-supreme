@@ -8,10 +8,10 @@ struct StepTimelineTests {
         #expect(timeline.step(at: 9_950_000) == 988)
     }
 
-    @Test func aTimeAfterTheMarkIsTheMarkedStep() {
+    @Test func aTimeAfterTheMarkIsThatManyStepsLater() {
         let timeline = StepTimeline(step: 1_000, at: 10_000_000, stepsPerSecond: 240)
 
-        #expect(timeline.step(at: 10_200_000) == 1_000)
+        #expect(timeline.step(at: 10_200_000) == 1_048)
     }
 
     @Test func aTimeBeforeTheFirstStepIsStepZero() {

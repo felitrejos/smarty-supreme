@@ -15,7 +15,9 @@ public struct StepTimeline: Sendable {
     }
 
     public func step(at time: Microseconds) -> UInt64 {
-        guard time < markedAt else { return markedStep }
+        guard time < markedAt else {
+            return markedStep + UInt64((Double(time - markedAt) * Double(stepsPerSecond) / 1_000_000).rounded())
+        }
         let stepsBack = UInt64((Double(markedAt - time) * Double(stepsPerSecond) / 1_000_000).rounded())
         return markedStep - min(stepsBack, markedStep)
     }
